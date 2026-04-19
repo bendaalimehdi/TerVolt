@@ -1,0 +1,50 @@
+{
+  "system": {
+    "device_id": "TERVOLT-ESP32-001",
+    "version": "1.0.0",
+    "customer_id": "001",
+    "customer_category": "business",
+    "customer_type": "hotel",
+    "customer_name": "Hotel-Riviera-Paris",
+    "location": "Paris, France",
+    "debug_mode": true
+  },
+  "network": {
+    "wifi_ssid": "BboxM",
+    "wifi_pass": "Midi2210@bbox",
+    "mqtt_server": "broker.hivemq.com",
+    "mqtt_port": 1883,
+    "mqtt_user": "tervolt_admin",
+    "mqtt_pass": "MqttAuthPwd",
+    "ntp_server": "pool.ntp.org"
+     },
+
+"hardware": {
+    "pin_cp_pwm": 13,
+    "pin_cp_adc": 14,
+    "pin_relay": 4,
+    "pin_led_red": 2,
+    "pin_led_green": 15,
+    "pin_rfid_ss": 5,
+    "pin_rfid_rst": 22
+  },
+ 
+  "electrical": {
+    "max_current_amps": 32,
+    "min_current_amps": 6,
+    "nominal_voltage": 400,
+    "phase_count": 3,
+    "ct_ratio": 2000,
+    "overcurrent_threshold": 35.0
+  },
+  "safety": {
+    "ground_check": true,
+    "temp_max_celsius": 75,
+    "lock_cable_during_charge": true
+  },
+  "display": {
+    "brightness": 128,
+    "language": "fr",
+    "timeout_screensaver": 60
+  }
+}
