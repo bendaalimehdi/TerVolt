@@ -11,8 +11,14 @@ ChargingManager::ChargingManager(Logger& logger, ConfigManager& config)
 }
 
 void ChargingManager::begin() {
-    pinMode(_relayPin, OUTPUT);
-    digitalWrite(_relayPin, LOW);
+    _pwmPin = _config.data.pins.cp_pwm;   
+    _adcPin = _config.data.pins.cp_adc;   
+    _relayPin = _config.data.pins.relay;
+
+    if (_relayPin != 0) { // Sécurité
+        pinMode(_relayPin, OUTPUT);
+        digitalWrite(_relayPin, LOW);
+    }
 
     // API ESP32 v3.0
     if (!ledcAttach(_pwmPin, PWM_FREQ, PWM_RES)) {
@@ -79,24 +85,77 @@ float ChargingManager::getDutyCycle() const {
     return duty;
 }
 
+String ChargingManager::getStateString() const {
+    switch (_state) {
+        case ChargingState::STATE_A: return "A - Libre";
+        case ChargingState::STATE_B: return "B - Véhicule connecté";
+        case ChargingState::STATE_C: return "C - Charge active";
+        case ChargingState::STATE_D: return "D - Ventilation requise";
+        case ChargingState::STATE_E: return "E - Erreur";
+        case ChargingState::STATE_F: return "F - Fault EVSE";
+        default:                     return "Inconnu";
+    }
+}
+
 void ChargingManager::update() {
     float vcp = readPilotVoltage();
+    ChargingState newState;
 
-    if (vcp > 10.5) { // État A
-        if (digitalRead(_relayPin)) {
-            digitalWrite(_relayPin, LOW);
-            _logger.info("Véhicule débranché.");
+    // Détermination de l'état selon la tension CP (J1772)
+    if      (vcp > 10.5)               newState = ChargingState::STATE_A;
+    else if (vcp > 8.0  && vcp < 10.5) newState = ChargingState::STATE_B;
+    else if (vcp > 5.0  && vcp < 8.0)  newState = ChargingState::STATE_C;
+    else if (vcp > 2.0  && vcp < 5.0)  newState = ChargingState::STATE_D;
+    else                                newState = ChargingState::STATE_E;
+
+    // Log uniquement lors d'un changement d'état
+    if (newState != _state) {
+        _logger.info("Transition état : " + getStateString() + " → ...");
+        _state = newState;
+
+        switch (_state) {
+            case ChargingState::STATE_A:
+                digitalWrite(_relayPin, LOW);
+                ledcWrite(_pwmPin, 1023); // Signal fixe 12V (pas de PWM)
+                _logger.info("[État A] Véhicule débranché. Relais ouvert.");
+                break;
+
+            case ChargingState::STATE_B:
+                digitalWrite(_relayPin, LOW); // Sécurité : relais ouvert
+                setMaxCurrent(_config.data.maxAmps);
+                _logger.info("[État B] Véhicule détecté. PWM actif à " + String(_config.data.maxAmps) + "A");
+                break;
+
+            case ChargingState::STATE_C:
+                if (isAuthorized()) {
+                    digitalWrite(_relayPin, HIGH);
+                    _logger.success("[État C] Charge démarrée !");
+                } else {
+                    _logger.warn("[État C] Véhicule demande la charge mais non autorisé.");
+                }
+                break;
+
+            case ChargingState::STATE_D:
+                digitalWrite(_relayPin, LOW);
+                _logger.warn("[État D] Ventilation requise — non supporté. Relais ouvert.");
+                break;
+
+            case ChargingState::STATE_E:
+            case ChargingState::STATE_F:
+                digitalWrite(_relayPin, LOW);
+                ledcWrite(_pwmPin, 0); // Coupe le signal CP
+                _logger.error("[État E/F] Fault détecté ! Relais ouvert, CP coupé.");
+                break;
+
+            default:
+                break;
         }
-        ledcWrite(_pwmPin, 1023); 
-    } 
-    else if (vcp > 8.0 && vcp < 10.0) { // État B
-        _logger.info("Véhicule détecté (État B).");
-        setMaxCurrent(_config.data.maxAmps);
     }
-    else if (vcp > 5.0 && vcp < 7.5) { // État C
-        if (isAuthorized() && !digitalRead(_relayPin)) {
-            _logger.success("Démarrage de la charge !");
-            digitalWrite(_relayPin, HIGH);
-        }
+
+    // Surveillance continue en état C : si le véhicule débranche sans passer par B
+    if (_state == ChargingState::STATE_C && !isAuthorized()) {
+        digitalWrite(_relayPin, LOW);
+        _state = ChargingState::STATE_B;
+        _logger.warn("Autorisation perdue en cours de charge. Relais ouvert.");
     }
 }

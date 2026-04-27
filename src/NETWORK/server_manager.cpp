@@ -29,9 +29,8 @@ void ServerManager::reconnect() {
 }
 
 void ServerManager::maintain() {
-    if (!_client.connected()) {
-        reconnect();
-    }
+    if (WiFi.status() != WL_CONNECTED) return;
+    if (!_client.connected()) reconnect();
     _client.loop();
 }
 

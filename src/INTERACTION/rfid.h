@@ -12,6 +12,8 @@ public:
     RfidManager(Logger& logger, ConfigManager& config);
     void begin();
     String update(); // Retourne l'UID si un badge est lu, sinon ""
+    bool isCardPresent(); // Nouvelle méthode
+    String readUID();     // Nouvelle méthode
 
 private:
     Logger& _logger;

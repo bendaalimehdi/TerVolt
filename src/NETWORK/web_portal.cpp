@@ -69,19 +69,27 @@ String WebPortal::generateDashboard() {
     html += "<div class='row'><span class='label'>Pin ADC (CP)</span><span class='value'>" + String(_config.data.pins.cp_adc) + "</span></div></div>";
 
     // --- CARD CHARGE LOGIC ---
-    // --- CARD CHARGE LOGIC ---
-    bool connected = _charger.isVehicleConnected();
     float duty = _charger.getDutyCycle();
-    
+    ChargingState state = _charger.getState();
+    String stateStr = _charger.getStateString();
+
+    // Couleur badge selon l'état
+    String stateBadge;
+    switch (state) {
+        case ChargingState::STATE_A: stateBadge = "bg-orange"; break;
+        case ChargingState::STATE_B: stateBadge = "bg-orange"; break;
+        case ChargingState::STATE_C: stateBadge = "bg-green";  break;
+        case ChargingState::STATE_D: stateBadge = "bg-orange"; break;
+        default:                     stateBadge = "bg-red";    break; // E, F
+    }
+
     html += "<div class='card'><h2>Logique de Charge</h2>";
-    html += "<div class='row'><span class='label'>État Pilot</span><span class='value'>" + String(connected ? "Connecté" : "Libre") + "</span></div>";
-    
-    // Affichage du Duty Cycle et PWM
+    html += "<div class='row'><span class='label'>État J1772</span><span class='badge " + stateBadge + "'>" + stateStr + "</span></div>";
     html += "<div class='row'><span class='label'>Signal PWM</span><span class='value'>" + String(duty, 1) + " %</span></div>";
-    
-    // Ajout d'une barre de visualisation du PWM
+
+    // Barre de visualisation du PWM
     html += "<div style='width:100%; background:#262a33; height:8px; border-radius:4px; margin:10px 0;'>";
-    html += "<div style='width:" + String(duty) + "%; background:#00d1b2; height:100%; border-radius:4px;'></div>";
+    html += "<div style='width:" + String(duty) + "%; background:#00d1b2; height:100%; border-radius:4px; transition:width 0.5s;'></div>";
     html += "</div>";
 
     html += "<div class='row'><span class='label'>Courant Max</span><span class='value'>" + String(_config.data.maxAmps) + " A</span></div>";
@@ -92,6 +100,11 @@ String WebPortal::generateDashboard() {
 
     html += "</div>"; // Fin container
     html += "<button class='btn' onclick='location.reload()'>ACTUALISER LES DONNÉES</button>";
+    html += "<p style='text-align:center; color:#555; font-size:0.75rem; margin-top:10px;'>Actualisation auto dans <span id='countdown'>5</span>s</p>";
+    html += "<script>";
+    html += "var t=5; var el=document.getElementById('countdown');";
+    html += "setInterval(function(){ t--; el.textContent=t; if(t<=0) location.reload(); }, 1000);";
+    html += "</script>";
     html += "</body></html>";
     return html;
 }

@@ -5,56 +5,127 @@
 #include "NETWORK/server_manager.h"
 #include "CHARGING_MANAGER/charging_manager.h"
 #include "NETWORK/web_portal.h"
+#include "INTERACTION/led_manager.h"
+#include "INTERACTION/rfid.h"
 
 WiFiClient espClient; // Objet de transport
 Logger logger;
 ConfigManager config;
-WifiManager wifi(logger);
+WifiManager wifi(logger, config);
 ServerManager server(logger, config);
 ChargingManager charger(logger, config);
 WebPortal webPortal(logger, config, charger, wifi);
+LedManager ledStrip(logger, config);
+RfidManager rfid(logger, config);       
+TaskHandle_t TaskNetworkHandle;
+TaskHandle_t TaskChargingHandle;
+
+// Prototypes des fonctions de tâches
+void TaskNetwork(void * pvParameters);
+void TaskCharging(void * pvParameters);
 
 void setup() {
-    logger.begin();
+    Serial.begin(115200);
     
-    if (config.begin()) {
-        wifi.connect(config.data.ssid, config.data.password);
-        server.begin(espClient);
+    // 1. Initialisation de la configuration (Indispensable avant tout)
+    if (!config.begin()) {
+        logger.error("Echec config - Verifier LittleFS");
+        return;
     }
+
+    // 2. Initialisation des périphériques
+    //ledStrip.begin();
+    //rfid.begin();
     charger.begin();
+
+    // 3. Création de la Tâche CHARGE sur le Cœur 1 (Application Core)
+    // C'est ici que la sécurité et la norme J1772 sont gérées
+    xTaskCreatePinnedToCore(
+        TaskCharging,   /* Fonction */
+        "TaskCharging", /* Nom */
+        10000,          /* Taille pile */
+        NULL,           /* Param */
+        2,              /* Priorité haute */
+        &TaskChargingHandle, 
+        1               /* COEUR 1 */
+    );
+
+    // 4. Création de la Tâche NETWORK sur le Cœur 0 (Protocol Core)
+    // Gestion du WiFi, MQTT et Portail Web
+    xTaskCreatePinnedToCore(
+        TaskNetwork,    /* Fonction */
+        "TaskNetwork",  /* Nom */
+        10000,          /* Taille pile */
+        NULL,           /* Param */
+        1,              /* Priorité normale */
+        &TaskNetworkHandle, 
+        0               /* COEUR 0 */
+    );
 }
 
-bool isPortalStarted = false;
-void loop() {
-    wifi.maintain();
-    server.maintain();
+// --- COEUR 0 : GESTION RÉSEAU & WIFI ---
+void TaskNetwork(void * pvParameters) {
+    logger.info("Task Network démarrée sur Coeur 0");
+    pinMode(config.data.pins.btn_config, INPUT_PULLUP);
     
+    wifi.begin();
+    server.begin(espClient);
+    webPortal.begin();
 
-    if (wifi.isConnected()) {
+    unsigned long pressStart = 0;
+    bool apStarted = false;  
+
+    for(;;) {
+        // Gestion du bouton WiFi AP (5 secondes sur GPIO 47)
+        if (digitalRead(config.data.pins.btn_config) == LOW) {
+        if (pressStart == 0) pressStart = millis();
+        if (!apStarted && millis() - pressStart > 5000) {
+            wifi.startAP();
+            apStarted = true;
+        }
+    } else {
+        pressStart = 0;
+        apStarted = false;
+    }
+
+        wifi.maintain();
         server.maintain();
-        if (wifi.isConnected() && !isPortalStarted) {
-            webPortal.begin();
-            isPortalStarted = true; // Empêche de relancer au prochain tour de loop
-        }
-    
-        // Si le WiFi coupe, on réinitialise le flag pour pouvoir relancer plus tard
-        if (!wifi.isConnected()) {
-            isPortalStarted = false;
-        }
-        server.publishStatus("{\"status\":\"online\", \"signal\":" + String(wifi.getSignalStrength()) + "}");
+        
+        // vTaskDelay est crucial pour laisser le système gérer le WiFi
+        vTaskDelay(10 / portTICK_PERIOD_MS); 
+    }
+}
 
-        
-        // Exemple : Envoyer un message de "vie" toutes les 30 secondes
-        static unsigned long lastHeartbeat = 0;
-        if (millis() - lastHeartbeat > 30000) {
-            lastHeartbeat = millis();
-            server.publishStatus("{\"heartbeat\":\"alive\"}");
+// --- COEUR 1 : GESTION DE LA CHARGE & SÉCURITÉ ---
+void TaskCharging(void * pvParameters) {
+    logger.info("Task Charging démarrée sur Coeur 1");
+
+    for(;;) {
+        // Lecture RFID
+        //if (rfid.isCardPresent()) {
+        //    String uid = rfid.readUID();
+        //    logger.info("Badge détecté : " + uid);
+            // Logique d'autorisation...
+        //}
+
+        // Mise à jour de la machine à états de charge (PWM, CP, Relais)
+        charger.update(); 
+
+        // Mise à jour des animations LED (Sillage fluide)
+        //ledStrip.update();
+
+        // Si on charge, on affiche l'animation verte
+        if (charger.isCharging()) {
+            //ledStrip.setStatusCharging();
+        } else {
+            //ledStrip.setStatusAvailable();
         }
+
+        vTaskDelay(5 / portTICK_PERIOD_MS); // Fréquence de rafraîchissement rapide
     }
-    static unsigned long lastCheck = 0;
-    if (millis() - lastCheck > 200) {
-        lastCheck = millis();
-        charger.update();
-        
-    }
+}
+
+void loop() {
+    // La boucle principale reste vide car tout est géré dans les tâches
+    vTaskDelete(NULL); 
 }

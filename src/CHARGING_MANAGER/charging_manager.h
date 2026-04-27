@@ -5,6 +5,15 @@
 #include "../LOG/log.h"
 #include "../CONFIG/config_manager.h"
 
+enum class ChargingState {
+    STATE_A,    // Pas de véhicule       — CP ~12V
+    STATE_B,    // Véhicule connecté     — CP ~9V
+    STATE_C,    // Charge en cours       — CP ~6V
+    STATE_D,    // Ventilation requise   — CP ~3V (non supporté)
+    STATE_E,    // Erreur / court-circuit
+    STATE_F     // Fault EVSE
+};
+
 class ChargingManager {
 public:
     ChargingManager(Logger& logger, ConfigManager& config);
@@ -21,6 +30,8 @@ public:
     bool isAuthorized() const;
     bool isFault() const; 
     float getDutyCycle() const;
+    ChargingState getState() const { return _state; }
+    String getStateString() const;
 
 private:
     Logger& _logger;
@@ -31,7 +42,8 @@ private:
     int _relayPin;
     
     float _targetAmps;
-    bool _isAuthorized = false; // Initialisation par défaut
+    bool _isAuthorized = false;
+    ChargingState _state = ChargingState::STATE_A;
     
     void setPWM(float dutyCycle); 
     float readPilotVoltage();     

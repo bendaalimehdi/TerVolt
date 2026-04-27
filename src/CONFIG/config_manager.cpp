@@ -21,15 +21,21 @@ bool ConfigManager::begin() {
     data.mqttServer = doc["network"]["mqtt_server"].as<String>();
     data.maxAmps = doc["electrical"]["max_current_amps"].as<int>();
     data.debugMode = doc["system"]["debug_mode"].as<bool>();
+    data.num_leds = doc["hardware"]["num_leds"].as<int>();
 
     // --- Mapping Hardware Pins ---
     data.pins.cp_pwm = doc["hardware"]["pin_cp_pwm"].as<int>();
     data.pins.cp_adc = doc["hardware"]["pin_cp_adc"].as<int>();
     data.pins.relay = doc["hardware"]["pin_relay"].as<int>();
-    data.pins.led_red = doc["hardware"]["pin_led_red"].as<int>();
-    data.pins.led_green = doc["hardware"]["pin_led_green"].as<int>();
     data.pins.rfid_ss = doc["hardware"]["pin_rfid_ss"].as<int>();
     data.pins.rfid_rst = doc["hardware"]["pin_rfid_rst"].as<int>();
+    data.pins.rcm_fault = doc["hardware"]["pin_rcm_fault"].as<int>();
+    data.pins.rcm_test = doc["hardware"]["pin_rcm_test"].as<int>();
+    data.pins.led_rgb = doc["hardware"]["pin_led_rgb"].as<int>();
+    
+    data.pins.btn_config = doc["hardware"]["pin_btn_config"].as<int>();
+    data.pins.pzem_rx = doc["hardware"]["pin_pzem_rx"].as<int>();
+    data.pins.pzem_tx = doc["hardware"]["pin_pzem_tx"].as<int>();
 
     file.close();
     return true;

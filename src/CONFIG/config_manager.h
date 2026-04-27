@@ -9,10 +9,14 @@ struct PinConfig {
     int cp_pwm;
     int cp_adc;
     int relay;
-    int led_red;
-    int led_green;
     int rfid_ss;
     int rfid_rst;
+    int rcm_fault;
+    int rcm_test;
+    int led_rgb;
+    int btn_config;
+    int pzem_rx;
+    int pzem_tx;
 };
 
 struct ConfigData {
@@ -24,6 +28,7 @@ struct ConfigData {
     String mqttServer;
     int maxAmps;
     bool debugMode;
+    int num_leds;
     PinConfig pins;
 };
 

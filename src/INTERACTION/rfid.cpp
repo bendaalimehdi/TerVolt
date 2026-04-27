@@ -29,3 +29,18 @@ String RfidManager::update() {
     _mfrc522.PICC_HaltA();
     return uid;
 }
+
+bool RfidManager::isCardPresent() {
+    return _mfrc522.PICC_IsNewCardPresent() && _mfrc522.PICC_ReadCardSerial();
+}
+
+String RfidManager::readUID() {
+    String uid = "";
+    for (byte i = 0; i < _mfrc522.uid.size; i++) {
+        uid += String(_mfrc522.uid.uidByte[i] < 0x10 ? "0" : "");
+        uid += String(_mfrc522.uid.uidByte[i], HEX);
+    }
+    _mfrc522.PICC_HaltA();
+    uid.toUpperCase();
+    return uid;
+}

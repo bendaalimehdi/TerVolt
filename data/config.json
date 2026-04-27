@@ -23,11 +23,16 @@
     "pin_cp_pwm": 13,
     "pin_cp_adc": 14,
     "pin_relay": 4,
-    "pin_led_red": 2,
-    "pin_led_green": 15,
     "pin_rfid_ss": 5,
-    "pin_rfid_rst": 22
-  },
+    "pin_rfid_rst": 22,
+    "pin_rcm_fault": 38,
+    "pin_rcm_test": 39,
+    "pin_led_rgb": 40,
+    "num_leds": 6,
+    "pin_btn_config": 47,
+    "pin_pzem_rx": 2,
+    "pin_pzem_tx": 1
+},
  
   "electrical": {
     "max_current_amps": 32,
