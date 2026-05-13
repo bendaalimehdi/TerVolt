@@ -28,6 +28,8 @@ void WebPortal::begin() {
         // Infos système
         doc["device_id"] = _config.data.deviceId;
         doc["uptime"] = millis() / 1000;
+        doc["ip"] = _wifi.getIP();
+        doc["rssi"] = _wifi.getSignalStrength();
 
         doc["session_active"] = _energy.session.isActive();
         doc["session_kwh"] = _energy.session.getSessionEnergyKwh();
@@ -229,8 +231,8 @@ String WebPortal::generateDashboard() {
 
         <section class="card">
             <h2>Connectivité</h2>
-            <div class="row"><span class="label">Adresse IP</span><span class="value">%IP%</span></div>
-            <div class="row"><span class="label">Signal WiFi</span><span class="badge %RSSI_CLASS%">%RSSI% dBm</span></div>
+            <div class="row"><span class="label">Adresse IP</span><span class="value" id="ip">%IP%</span></div>
+            <div class="row"><span class="label">Signal WiFi</span><span class="badge %RSSI_CLASS%" id="rssi">%RSSI% dBm</span></div>
             <div class="row"><span class="label">Serveur MQTT</span><span class="value">%MQTT%</span></div>
         </section>
 
@@ -284,8 +286,12 @@ String WebPortal::generateDashboard() {
                 const response = await fetch('/api/status');
                 const data = await response.json();
 
-                document.getElementById('voltage').textContent = data.voltage.toFixed(1) + ' V';
-                document.getElementById('current').textContent = data.current_real.toFixed(2) + ' A';
+                document.getElementById('voltage_a').textContent = data.voltage_a.toFixed(1) + ' V';
+                document.getElementById('current_a').textContent = data.current_a.toFixed(2) + ' A';
+                document.getElementById('voltage_b').textContent = data.voltage_b.toFixed(1) + ' V';
+                document.getElementById('current_b').textContent = data.current_b.toFixed(2) + ' A';
+                document.getElementById('voltage_c').textContent = data.voltage_c.toFixed(1) + ' V';
+                document.getElementById('current_c').textContent = data.current_c.toFixed(2) + ' A';
                 document.getElementById('power').textContent = data.power.toFixed(1) + ' W';
 
                 document.getElementById('uptime').textContent = Math.floor(data.uptime / 60) + ' min';
@@ -294,6 +300,8 @@ String WebPortal::generateDashboard() {
                 document.getElementById('session_duration').textContent = data.session_duration + ' s';
 
                 document.getElementById('state').textContent = data.status;
+                document.getElementById('ip').textContent = data.ip;
+                document.getElementById('rssi').textContent = data.rssi + ' dBm';
             } catch (error) {
                 console.error('Erreur API:', error);
             }

@@ -1,4 +1,5 @@
 #include "server_manager.h"
+#include <LittleFS.h>
 
 ServerManager::ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger)
     : _logger(logger), _config(config), _energy(energy), _charger(charger), _client() {}
@@ -11,14 +12,69 @@ void ServerManager::begin(WiFiClient& espClient) {
     });
 }
 
+void ServerManager::initStorage() {
+    if (!LittleFS.exists("/sessions")) {
+        LittleFS.mkdir("/sessions");
+        _logger.info("Dossier /sessions créé");
+    }
+}
+
+// Sauvegarde locale en JSON
+void ServerManager::saveSessionLocally(ChargeSession& s) {
+    String path = "/sessions/" + s.getSessionId() + ".json";
+    File file = LittleFS.open(path, "w");
+    if (!file) {
+        _logger.error("Impossible de créer le fichier session local");
+        return;
+    }
+
+    JsonDocument doc;
+    doc["type"] = "charge_session";
+    doc["session_id"] = s.getSessionId();
+    doc["from"] = _config.data.deviceId;
+    doc["start_time"] = s.getStartTime();
+    doc["end_time"] = s.getEndTime();
+    doc["duration_sec"] = s.getDurationSec();
+    doc["energy_kwh"] = s.getEnergyKwh();
+
+    serializeJson(doc, file);
+    file.close();
+    _logger.success("[OK] Session sauvegardée localement : " + s.getSessionId());
+}
+
+// Synchronisation des sessions en attente
+void ServerManager::syncPendingSessions() {
+    if (!_client.connected()) return;
+
+    File root = LittleFS.open("/sessions");
+    File file = root.openNextFile();
+    while (file) {
+        String path = file.name();
+        if (path.endsWith(".json")) {
+            _logger.info("[INFO] Tentative d'envoi session : " + path);
+            String payload;
+            while(file.available()) payload += (char)file.read();
+            
+            String topic = "tervolt/" + _config.data.deviceId + "/sessions";
+            if (_client.publish(topic.c_str(), payload.c_str())) {
+                _logger.info("[INFO] Session envoyée, en attente de l'ACK");
+            }
+        }
+        file = root.openNextFile();
+    }
+}
+
 void ServerManager::reconnect() {
     if (!_client.connected()) {
+        _logger.info("MQTT: tentative connexion à " + _config.data.mqttServer);
+
         if (_client.connect(_config.data.deviceId.c_str())) {
             _logger.success("MQTT Connecté : " + _config.data.deviceId);
-            
-            // Topic spécifique : tervolt/TERVOLT-00X
+
             String topic = "tervolt/" + _config.data.deviceId;
-            _client.subscribe(topic.c_str()); 
+            _client.subscribe(topic.c_str());
+        } else {
+            _logger.error("MQTT échec connexion, state=" + String(_client.state()));
         }
     }
 }
@@ -68,20 +124,13 @@ bool ServerManager::isConnected() {
 // Gestion des messages reçus du serveur Python
 void ServerManager::handleCallback(char* topic, byte* payload, unsigned int length) {
     JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, payload, length);
-    if (error) return;
+    if (deserializeJson(doc, payload, length)) return;
 
-    // Vérification du destinataire dans le JSON
-    String target = doc["target_id"].as<String>();
-    if (target != "" && target != _config.data.deviceId) {
-        return; // Ce message ne m'est pas destiné
-    }
-
-    // Analyse de la commande
-    String cmd = doc["cmd"].as<String>();
-    if (cmd == "set_current") {
-        float val = doc["value"].as<float>();
-        _charger.setMaxCurrent(val); // Modifie le PWM en temps réel
-        _logger.success("MQTT: Courant ajusté à " + String(val) + "A par le serveur");
+    if (doc["cmd"] == "session_ack" && doc["status"] == "ok") {
+        String sid = doc["session_id"].as<String>();
+        String path = "/sessions/" + sid + ".json";
+        if (LittleFS.remove(path)) {
+            _logger.success("[OK] ACK reçu. Session supprimée de LittleFS : " + sid);
+        }
     }
 }

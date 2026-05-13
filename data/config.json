@@ -12,7 +12,7 @@
   "network": {
     "wifi_ssid": "Livebox-57C0_kon",
     "wifi_pass": "Designclic94270+",
-    "mqtt_server": "localhost:5000",
+    "mqtt_server": "192.168.1.30",
     "mqtt_port": 1883,
     "mqtt_user": "tervolt_admin",
     "mqtt_pass": "MqttAuthPwd",

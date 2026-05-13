@@ -15,7 +15,9 @@ public:
     ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger);
     void begin(WiFiClient& espClient);
     void maintain();
-
+    void initStorage();
+    void saveSessionLocally(ChargeSession& s);
+    void syncPendingSessions();
     void publishFullStatus();
     bool isConnected();
     

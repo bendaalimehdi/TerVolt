@@ -74,6 +74,7 @@ void setup() {
 
 // --- COEUR 0 : GESTION RÉSEAU & WIFI ---
 void TaskNetwork(void * pvParameters) {
+    server.initStorage();
     unsigned long lastMsg = 0;
     logger.info("Task Network démarrée sur Coeur 0");
     pinMode(config.data.pins.btn_config, INPUT_PULLUP);
@@ -101,9 +102,10 @@ void TaskNetwork(void * pvParameters) {
         wifi.maintain();
         server.maintain();
 
-        if (millis() - lastMsg > 5000) {
-            server.publishFullStatus();
+        if (server.isConnected() && (millis() - lastMsg > 10000)) { 
             lastMsg = millis();
+            server.publishFullStatus();
+            logger.info("MQTT : Statut périodique envoyé au serveur.");
         }
         
         // vTaskDelay est crucial pour laisser le système gérer le WiFi
@@ -123,14 +125,19 @@ void TaskCharging(void * pvParameters) {
             // Logique d'autorisation...
         //}
         energy.update();
-        // Logique de session
-        if (charger.getState() == ChargingState::STATE_C && !energy.session.isActive()) {
-            energy.session.start();
-            logger.info("Session de charge démarrée");
-        } 
-        else if (charger.getState() != ChargingState::STATE_C && energy.session.isActive()) {
+        ChargingState currentState = charger.getState();
+
+        // 1. Détection Début Session
+        if (currentState == ChargingState::STATE_C && !energy.session.isActive()) {
+            energy.session.start(config.data.deviceId);
+            logger.success("[OK] Session démarrée");
+        }
+
+        // 2. Détection Fin Session
+        else if (currentState != ChargingState::STATE_C && energy.session.isActive()) {
             energy.session.stop();
-            logger.warn("Session terminée. Total: " + String(energy.session.getSessionEnergyKwh()) + " kWh");
+            logger.success("[OK] Session terminée");
+            server.saveSessionLocally(energy.session);
         }
         // Mise à jour de la machine à états de charge (PWM, CP, Relais)
         charger.update(); 
