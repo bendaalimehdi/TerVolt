@@ -51,18 +51,20 @@ void EnergyManager::update() {
     _activePowerC = _atm90.GetActivePowerC();
     _activePowerTotal = _atm90.GetTotalActivePower();
 
-    if (_config.data.debugMode) {
-        _logger.info(
-            "ATM90E32 | "
-            "VA=" + String(_voltageA) + "V "
-            "VB=" + String(_voltageB) + "V "
-            "VC=" + String(_voltageC) + "V | "
-            "IA=" + String(_currentA) + "A "
-            "IB=" + String(_currentB) + "A "
-            "IC=" + String(_currentC) + "A | "
-            "P=" + String(_activePowerTotal) + "W"
-        );
-    }
+    
+
+    // if (_config.data.debugMode) {
+    //     _logger.info(
+    //         "ATM90E32 | "
+    //         "VA=" + String(_voltageA) + "V "
+    //         "VB=" + String(_voltageB) + "V "
+    //         "VC=" + String(_voltageC) + "V | "
+    //         "IA=" + String(_currentA) + "A "
+    //         "IB=" + String(_currentB) + "A "
+    //         "IC=" + String(_currentC) + "A | "
+    //         "P=" + String(_activePowerTotal) + "W"
+    //     );
+    // }
     session.update(_activePowerTotal);
     _lastRead = millis();
 }

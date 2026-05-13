@@ -7,23 +7,30 @@
 #include "NETWORK/web_portal.h"
 #include "INTERACTION/led_manager.h"
 #include "INTERACTION/rfid.h"
+#include "ENERGY/energy_manager.h"
 
-WiFiClient espClient; // Objet de transport
+WiFiClient espClient;
 Logger logger;
 ConfigManager config;
+
 WifiManager wifi(logger, config);
-ServerManager server(logger, config);
+
 ChargingManager charger(logger, config);
 EnergyManager energy(logger, config);
+
+ServerManager server(logger, config, energy, charger);
+
 WebPortal webPortal(logger, config, charger, wifi, energy);
+
 LedManager ledStrip(logger, config);
-RfidManager rfid(logger, config);       
-TaskHandle_t TaskNetworkHandle;
-TaskHandle_t TaskChargingHandle;
+RfidManager rfid(logger, config);
 
 // Prototypes des fonctions de tâches
 void TaskNetwork(void * pvParameters);
 void TaskCharging(void * pvParameters);
+
+TaskHandle_t TaskChargingHandle = NULL;
+TaskHandle_t TaskNetworkHandle = NULL;
 
 void setup() {
     Serial.begin(115200);
@@ -67,6 +74,7 @@ void setup() {
 
 // --- COEUR 0 : GESTION RÉSEAU & WIFI ---
 void TaskNetwork(void * pvParameters) {
+    unsigned long lastMsg = 0;
     logger.info("Task Network démarrée sur Coeur 0");
     pinMode(config.data.pins.btn_config, INPUT_PULLUP);
     
@@ -92,6 +100,11 @@ void TaskNetwork(void * pvParameters) {
 
         wifi.maintain();
         server.maintain();
+
+        if (millis() - lastMsg > 5000) {
+            server.publishFullStatus();
+            lastMsg = millis();
+        }
         
         // vTaskDelay est crucial pour laisser le système gérer le WiFi
         vTaskDelay(10 / portTICK_PERIOD_MS); 

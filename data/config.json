@@ -10,9 +10,9 @@
     "debug_mode": true
   },
   "network": {
-    "wifi_ssid": "BboxM",
-    "wifi_pass": "Midi2210@bbox",
-    "mqtt_server": "broker.hivemq.com",
+    "wifi_ssid": "Livebox-57C0_kon",
+    "wifi_pass": "Designclic94270+",
+    "mqtt_server": "localhost:5000",
     "mqtt_port": 1883,
     "mqtt_user": "tervolt_admin",
     "mqtt_pass": "MqttAuthPwd",

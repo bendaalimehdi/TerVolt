@@ -16,7 +16,7 @@ public:
     void begin();
     void update();
 
-    float getActivePower() const { return _activePowerTotal; }
+    float activePowerTotal() const { return _activePowerTotal; }
 
     float getVoltageA() const { return _voltageA; }
     float getVoltageB() const { return _voltageB; }

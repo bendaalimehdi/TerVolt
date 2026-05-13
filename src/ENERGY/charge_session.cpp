@@ -72,3 +72,14 @@ float ChargeSession::getInstantPowerKw() const {
 bool ChargeSession::isActive() const {
     return _isActive;
 }
+
+String ChargeSession::getFormattedTime() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        return "--:--:--";
+    }
+
+    char timeStringBuff[20];
+    strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
+    return String(timeStringBuff);
+}

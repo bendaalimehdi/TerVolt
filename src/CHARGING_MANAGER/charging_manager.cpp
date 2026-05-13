@@ -41,7 +41,16 @@ void ChargingManager::setPWM(float dutyCyclePercent) {
 }
 
 float ChargingManager::readPilotVoltage() {
-    int raw = analogRead(_adcPin);
+    // Lissage par moyenne pour éliminer le bruit quand rien n'est branché
+    long sum = 0;
+    const int samples = 25; 
+    for(int i = 0; i < samples; i++) {
+        sum += analogRead(_adcPin);
+        delayMicroseconds(50); // Petit délai pour laisser l'ADC se stabiliser
+    }
+    float raw = sum / (float)samples;
+    
+    // Ton calcul de pont diviseur (ajuste le ratio 4.0 si nécessaire)
     float voltage = (raw / 4095.0) * 3.3 * 4.0; 
     return voltage;
 }
@@ -99,29 +108,42 @@ String ChargingManager::getStateString() const {
 
 void ChargingManager::update() {
     float vcp = readPilotVoltage();
-    ChargingState newState;
+    ChargingState detectedState;
 
     // Détermination de l'état selon la tension CP (J1772)
-    if      (vcp > 10.5)               newState = ChargingState::STATE_A;
-    else if (vcp > 8.0  && vcp < 10.5) newState = ChargingState::STATE_B;
-    else if (vcp > 5.0  && vcp < 8.0)  newState = ChargingState::STATE_C;
-    else if (vcp > 2.0  && vcp < 5.0)  newState = ChargingState::STATE_D;
-    else                                newState = ChargingState::STATE_E;
+    if      (vcp > 10.5)               detectedState = ChargingState::STATE_A;
+    else if (vcp > 8.0  && vcp < 10.5) detectedState = ChargingState::STATE_B;
+    else if (vcp > 5.0  && vcp < 8.0)  detectedState = ChargingState::STATE_C;
+    else if (vcp > 2.0  && vcp < 5.0)  detectedState = ChargingState::STATE_D;
+    else                               detectedState = ChargingState::STATE_E;
 
-    // Log uniquement lors d'un changement d'état
-    if (newState != _state) {
-        _logger.info("Transition état : " + getStateString() + " → ...");
-        _state = newState;
+    // --- LOGIQUE ANTI-REBOND (DEBOUNCE) ---
+    static ChargingState lastRawState = _state;
+    static unsigned long lastChangeTime = 0;
+    const unsigned long CONFIRM_DELAY = 150; // 150ms de stabilité requis
+
+    if (detectedState != lastRawState) {
+        lastChangeTime = millis();
+        lastRawState = detectedState;
+    }
+
+    // On ne change l'état réel que si le nouvel état est stable
+    if (detectedState != _state && (millis() - lastChangeTime > CONFIRM_DELAY)) {
+       _state = detectedState;
+       _logger.info("Changement d'état confirmé : " + getStateString());
+
+        ChargingState previousState = _state;
+        _state = detectedState;
 
         switch (_state) {
             case ChargingState::STATE_A:
                 digitalWrite(_relayPin, LOW);
-                ledcWrite(_pwmPin, 1023); // Signal fixe 12V (pas de PWM)
+                ledcWrite(_pwmPin, 1023);
                 _logger.info("[État A] Véhicule débranché. Relais ouvert.");
                 break;
 
             case ChargingState::STATE_B:
-                digitalWrite(_relayPin, LOW); // Sécurité : relais ouvert
+                digitalWrite(_relayPin, LOW);
                 setMaxCurrent(_config.data.maxAmps);
                 _logger.info("[État B] Véhicule détecté. PWM actif à " + String(_config.data.maxAmps) + "A");
                 break;
@@ -131,19 +153,20 @@ void ChargingManager::update() {
                     digitalWrite(_relayPin, HIGH);
                     _logger.success("[État C] Charge démarrée !");
                 } else {
+                    digitalWrite(_relayPin, LOW);
                     _logger.warn("[État C] Véhicule demande la charge mais non autorisé.");
                 }
                 break;
 
             case ChargingState::STATE_D:
-                digitalWrite(_relayPin, HIGH); 
+                digitalWrite(_relayPin, HIGH);
                 _logger.warn("[État D] Ventilation requise — Air libre. Relais fermé.");
                 break;
 
             case ChargingState::STATE_E:
             case ChargingState::STATE_F:
                 digitalWrite(_relayPin, LOW);
-                ledcWrite(_pwmPin, 0); // Coupe le signal CP
+                ledcWrite(_pwmPin, 0);
                 _logger.error("[État E/F] Fault détecté ! Relais ouvert, CP coupé.");
                 break;
 
@@ -152,7 +175,7 @@ void ChargingManager::update() {
         }
     }
 
-    // Surveillance continue en état C : si le véhicule débranche sans passer par B
+    // Surveillance continue en état C
     if (_state == ChargingState::STATE_C && !isAuthorized()) {
         digitalWrite(_relayPin, LOW);
         _state = ChargingState::STATE_B;
