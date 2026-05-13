@@ -1,12 +1,48 @@
 #include "web_portal.h"
 
-WebPortal::WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi) 
-    : _server(80), _logger(logger), _config(config), _charger(charger), _wifi(wifi) {}
+WebPortal::WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi, EnergyManager& energy) 
+    : _server(80), _logger(logger), _config(config), _charger(charger), _wifi(wifi), _energy(energy) {}
 
 void WebPortal::begin() {
     _server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
         request->send(200, "text/html", generateDashboard());
     });
+
+// --- ROUTE : API Status (Données en temps réel) ---
+    _server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        
+        // État de la borne
+        doc["status"] = _charger.getStateString();
+        // doc["target_amps"] = _charger.getTargetAmps();
+        
+        // Mesures électriques réelles (ATM90E32)
+        doc["voltage"] = _energy.getVoltageA();
+        doc["current_real"] = _energy.getCurrentA();
+        doc["power"] = _energy.getActivePower();
+        
+        // Infos système
+        doc["device_id"] = _config.data.deviceId;
+        doc["uptime"] = millis() / 1000;
+
+        doc["session_active"] = _energy.session.isActive();
+        doc["session_kwh"] = _energy.session.getSessionEnergyKwh();
+        doc["session_duration"] = _energy.session.getDurationSec();
+
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
+    });
+
+    // --- ROUTE : Contrôle (Actionner le relais / Changer Ampères) ---
+    // _server.on("/api/control", HTTP_POST, [this](AsyncWebServerRequest *request) {
+    //     if (request->hasParam("amps", true)) {
+    //         float amps = request->getParam("amps", true)->value().toFloat();
+    //         _charger.setTargetAmps(amps);
+    //         _logger.info("WebPortal: Courant modifié via UI -> " + String(amps) + "A");
+    //     }
+    //     request->send(200, "application/json", "{\"result\":\"ok\"}");
+    // });
 
     _server.begin();
     _logger.success("Portail Web de production lancé sur le port 80");
@@ -60,6 +96,33 @@ String WebPortal::generateDashboard() {
     html += "<div class='row'><span class='label'>Adresse IP</span><span class='value'>" + _wifi.getIP() + "</span></div>";
     html += "<div class='row'><span class='label'>Signal WiFi</span><span class='badge " + rssiClass + "'>" + String(rssi) + " dBm</span></div>";
     html += "<div class='row'><span class='label'>Serveur MQTT</span><span class='value'>" + _config.data.mqttServer + "</span></div></div>";
+
+    // --- CARD ENERGY ATM90E32 ---
+    html += "<div class='card'><h2>Énergie / ATM90E32</h2>";
+
+    html += "<div class='row'><span class='label'>Tension L1</span><span class='value'>" + String(_energy.getVoltageA(), 1) + " V</span></div>";
+    html += "<div class='row'><span class='label'>Tension L2</span><span class='value'>" + String(_energy.getVoltageB(), 1) + " V</span></div>";
+    html += "<div class='row'><span class='label'>Tension L3</span><span class='value'>" + String(_energy.getVoltageC(), 1) + " V</span></div>";
+
+    html += "<div class='row'><span class='label'>Courant L1</span><span class='value'>" + String(_energy.getCurrentA(), 2) + " A</span></div>";
+    html += "<div class='row'><span class='label'>Courant L2</span><span class='value'>" + String(_energy.getCurrentB(), 2) + " A</span></div>";
+    html += "<div class='row'><span class='label'>Courant L3</span><span class='value'>" + String(_energy.getCurrentC(), 2) + " A</span></div>";
+
+    html += "<div class='row'><span class='label'>Puissance L1</span><span class='value'>" + String(_energy.getActivePowerA(), 1) + " W</span></div>";
+    html += "<div class='row'><span class='label'>Puissance L2</span><span class='value'>" + String(_energy.getActivePowerB(), 1) + " W</span></div>";
+    html += "<div class='row'><span class='label'>Puissance L3</span><span class='value'>" + String(_energy.getActivePowerC(), 1) + " W</span></div>";
+
+    html += "<div class='row'><span class='label'>Puissance Totale</span><span class='value'>" + String(_energy.getActivePower(), 1) + " W</span></div>";
+
+    html += "</div>";
+
+    // --- CARD SESSION ---
+    html += "<div class='card'><h2>Session de Charge</h2>";
+    html += "<div class='row'><span class='label'>Activée</span><span class='value'>" + String(_energy.session.isActive() ? "Oui" : "Non") + "</span></div>";
+    html += "<div class='row'><span class='label'>Énergie (kWh)</span><span class='value'>" + String(_energy.session.getSessionEnergyKwh(), 3) + "</span></div>";
+    html += "<div class='row'><span class='label'>Durée (s)</span><span class='value'>" + String(_energy.session.getDurationSec()) + "</span></div>";
+    html += "</div>";
+    
 
     // --- CARD HARDWARE ---
     bool relayOn = digitalRead(_config.data.pins.relay);

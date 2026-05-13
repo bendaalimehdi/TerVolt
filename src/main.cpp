@@ -14,7 +14,8 @@ ConfigManager config;
 WifiManager wifi(logger, config);
 ServerManager server(logger, config);
 ChargingManager charger(logger, config);
-WebPortal webPortal(logger, config, charger, wifi);
+EnergyManager energy(logger, config);
+WebPortal webPortal(logger, config, charger, wifi, energy);
 LedManager ledStrip(logger, config);
 RfidManager rfid(logger, config);       
 TaskHandle_t TaskNetworkHandle;
@@ -27,7 +28,7 @@ void TaskCharging(void * pvParameters);
 void setup() {
     Serial.begin(115200);
     
-    // 1. Initialisation de la configuration (Indispensable avant tout)
+    // 1. Initialisation de la configuration 
     if (!config.begin()) {
         logger.error("Echec config - Verifier LittleFS");
         return;
@@ -37,6 +38,7 @@ void setup() {
     //ledStrip.begin();
     //rfid.begin();
     charger.begin();
+    energy.begin();
 
     // 3. Création de la Tâche CHARGE sur le Cœur 1 (Application Core)
     // C'est ici que la sécurité et la norme J1772 sont gérées
@@ -107,7 +109,16 @@ void TaskCharging(void * pvParameters) {
         //    logger.info("Badge détecté : " + uid);
             // Logique d'autorisation...
         //}
-
+        energy.update();
+        // Logique de session
+        if (charger.getState() == ChargingState::STATE_C && !energy.session.isActive()) {
+            energy.session.start();
+            logger.info("Session de charge démarrée");
+        } 
+        else if (charger.getState() != ChargingState::STATE_C && energy.session.isActive()) {
+            energy.session.stop();
+            logger.warn("Session terminée. Total: " + String(energy.session.getSessionEnergyKwh()) + " kWh");
+        }
         // Mise à jour de la machine à états de charge (PWM, CP, Relais)
         charger.update(); 
 

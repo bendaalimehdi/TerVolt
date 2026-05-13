@@ -8,15 +8,18 @@
 struct PinConfig {
     int cp_pwm;
     int cp_adc;
+    int pp_adc;      
     int relay;
+    int spi_sck;     
+    int spi_miso;    
+    int spi_mosi;    
     int rfid_ss;
     int rfid_rst;
-    int rcm_fault;
-    int rcm_test;
+    int energy_cs;   
     int led_rgb;
     int btn_config;
-    int pzem_rx;
-    int pzem_tx;
+    int rcm_fault;
+    int rcm_test;
 };
 
 struct ConfigData {

@@ -88,3 +88,11 @@ void WifiManager::startAP() {
 void WifiManager::stopAP() {
     WiFi.softAPdisconnect(true);
 }
+
+
+void WifiManager::setupTime() {
+    // Serveurs NTP : pool.ntp.org est universel
+    // "CET-1CEST,M3.5.0,M10.5.0/3" est la règle pour l'Europe (Paris/Tunis)
+    configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nist.gov");
+    _logger.info("NTP : Synchronisation de l'heure en cours...");
+}

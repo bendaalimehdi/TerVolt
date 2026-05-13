@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include "../LOG/log.h"
 #include "../CONFIG/config_manager.h"
+#include <time.h>
 
 
 class WifiManager {
@@ -17,6 +18,7 @@ public:
     int getSignalStrength(); 
     void startAP(); 
     void stopAP();
+    void setupTime(); 
 
 private:
     Logger& _logger;

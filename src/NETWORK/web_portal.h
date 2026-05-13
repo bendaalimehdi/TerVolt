@@ -7,10 +7,13 @@
 #include "../CONFIG/config_manager.h"
 #include "../CHARGING_MANAGER/charging_manager.h"
 #include "../NETWORK/wifi_manager.h"
+#include "../ENERGY/energy_manager.h"
+#include "../ENERGY/charge_session.h"
+
 
 class WebPortal {
 public:
-    WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi);
+    WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi, EnergyManager& energy);
     void begin();
 
 private:
@@ -19,6 +22,7 @@ private:
     ConfigManager& _config;
     ChargingManager& _charger;
     WifiManager& _wifi;
+    EnergyManager& _energy;
 
     String generateDashboard(); // Génère le HTML dynamique
 };

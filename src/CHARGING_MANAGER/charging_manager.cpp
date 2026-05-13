@@ -136,8 +136,8 @@ void ChargingManager::update() {
                 break;
 
             case ChargingState::STATE_D:
-                digitalWrite(_relayPin, LOW);
-                _logger.warn("[État D] Ventilation requise — non supporté. Relais ouvert.");
+                digitalWrite(_relayPin, HIGH); 
+                _logger.warn("[État D] Ventilation requise — Air libre. Relais fermé.");
                 break;
 
             case ChargingState::STATE_E:

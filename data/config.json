@@ -22,17 +22,20 @@
 "hardware": {
     "pin_cp_pwm": 13,
     "pin_cp_adc": 14,
+    "pin_pp_adc": 15,
     "pin_relay": 4,
-    "pin_rfid_ss": 5,
-    "pin_rfid_rst": 22,
-    "pin_rcm_fault": 38,
-    "pin_rcm_test": 39,
+    "pin_spi_sck": 10,
+    "pin_spi_miso": 12,
+    "pin_spi_mosi": 11,
+    "pin_rfid_ss": 7,
+    "pin_rfid_rst": 5,
+    "pin_energy_cs": 6,
     "pin_led_rgb": 40,
     "num_leds": 6,
-    "pin_btn_config": 47,
-    "pin_pzem_rx": 2,
-    "pin_pzem_tx": 1
-},
+    "pin_btn_config": 0,
+    "pin_rcm_fault": 38,
+    "pin_rcm_test": 39
+  },
  
   "electrical": {
     "max_current_amps": 32,
