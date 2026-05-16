@@ -12,11 +12,13 @@
   "network": {
     "wifi_ssid": "BboxM",
     "wifi_pass": "Midi2210@bbox",
+    "ap_password": "admin1234",
     "mqtt_server": "192.168.1.119",
     "mqtt_port": 1883,
     "mqtt_user": "tervolt_admin",
     "mqtt_pass": "MqttAuthPwd",
-    "ntp_server": "pool.ntp.org"
+    "ntp_server": "pool.ntp.org",
+    "ota_password": "TerVoltSecureOta2026!"
      },
 
 "hardware": {
@@ -26,6 +28,7 @@
     "pin_relay": 1,
     "pin_precharge": 2,
     "pin_feedback_relay": 42,
+    "pin_temp_sensors": 18,
     "pin_spi_sck": 10,
     "pin_spi_miso": 12,
     "pin_spi_mosi": 11,

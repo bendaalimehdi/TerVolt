@@ -9,10 +9,11 @@
 #include  <esp_wifi.h>
 #include "../ENERGY/energy_manager.h"
 #include "../CHARGING_MANAGER/charging_manager.h"
+#include "ota_manager.h"
 
 class ServerManager {
 public:
-    ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger);
+    ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger, OtaManager& otaManager);
     void begin(WiFiClient& espClient);
     void maintain();
     void initStorage();
@@ -27,6 +28,7 @@ private:
     ConfigManager& _config;
     EnergyManager& _energy;
     ChargingManager& _charger;
+    OtaManager& _otaManager;
     PubSubClient _client;
     unsigned long _lastReconnectAttempt = 0;
 

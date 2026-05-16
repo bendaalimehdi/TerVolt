@@ -1,8 +1,8 @@
 #include "server_manager.h"
 #include <LittleFS.h>
 
-ServerManager::ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger)
-    : _logger(logger), _config(config), _energy(energy), _charger(charger), _client() {}
+ServerManager::ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger, OtaManager& otaManager)
+    : _logger(logger), _config(config), _energy(energy), _charger(charger), _otaManager(otaManager), _client() {}
 
 void ServerManager::begin(WiFiClient& espClient) {
     _client.setClient(espClient);
@@ -89,6 +89,7 @@ void ServerManager::publishFullStatus() {
     if (!_client.connected()) return;
 
     JsonDocument doc;
+    
     doc["from"] = _config.data.deviceId; // Indique quelle borne parle
     doc["type"] = "status";
     doc["state"] = _charger.getStateString();
@@ -131,6 +132,20 @@ void ServerManager::handleCallback(char* topic, byte* payload, unsigned int leng
         String path = "/sessions/" + sid + ".json";
         if (LittleFS.remove(path)) {
             _logger.success("[OK] ACK reçu. Session supprimée de LittleFS : " + sid);
+        }
+    }
+    // À l'intérieur de votre méthode de traitement de commandes MQTT dans server_manager.cpp
+    const char* action = doc["action"];
+    if (action != nullptr && strcmp(action, "ota_update") == 0) {
+        String url = doc["url"].as<String>();
+        String type = doc["type"].as<String>(); // "firmware" ou "filesystem"
+        
+        if (url.length() > 0 && type.length() > 0) {
+            _logger.warn("ServerManager : Routage de la demande de mise à jour vers l'OtaManager.");
+            // Utilisation de la variable membre privée avec le "_"
+            _otaManager.updateFromCloud(url, type); 
+        } else {
+            _logger.error("ServerManager : Commande ota_update reçue mais 'url' ou 'type' manquant.");
         }
     }
 }

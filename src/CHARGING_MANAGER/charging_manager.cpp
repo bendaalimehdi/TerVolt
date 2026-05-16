@@ -9,6 +9,7 @@ ChargingManager::ChargingManager(Logger& logger, ConfigManager& config)
     _adcPin = _config.data.pins.cp_adc;   
     _relayPin = _config.data.pins.relay;
     _prechargePin = _config.data.pins.precharge;
+    _feedbackRelayPin = _config.data.pins.feedback_relay;
 }
 
 void ChargingManager::begin() {
@@ -16,10 +17,12 @@ void ChargingManager::begin() {
     _adcPin = _config.data.pins.cp_adc;   
     _relayPin = _config.data.pins.relay;
     _prechargePin = _config.data.pins.precharge;
+    _feedbackRelayPin = _config.data.pins.feedback_relay;
     
         // Configuration des pins
         pinMode(_adcPin, INPUT);
         pinMode(_prechargePin, OUTPUT);
+        pinMode(_feedbackRelayPin, INPUT_PULLUP); 
 
     if (_relayPin != 0) { // Sécurité
         pinMode(_relayPin, OUTPUT);
@@ -32,6 +35,26 @@ void ChargingManager::begin() {
     }
     ledcWrite(_pwmPin, 1023); 
     _logger.success("ChargingManager initialisé");
+}
+
+bool ChargingManager::checkRelayGlueFault() {
+    bool relayCommandedOn = (digitalRead(_relayPin) == HIGH);
+    // Ici, LOW = Contact auxiliaire fermé (physiquement passant)
+    bool relayPhysicallyClosed = (digitalRead(_feedbackRelayPin) == LOW); 
+
+    // SENS 1 : ERREUR DE COLLAGE (Le relais devrait être ouvert/OFF mais il est fermé)
+    if (!relayCommandedOn && relayPhysicallyClosed) {
+        _logger.error("DÉFAUT SÉCURITÉ : Contacteur collé ou soudé !");
+        return true; 
+    }
+
+    // SENS 2 : ERREUR D'ENCLENCHEMENT (Le relais devrait être fermé/ON mais il reste ouvert)
+    if (relayCommandedOn && !relayPhysicallyClosed) {
+        _logger.error("DÉFAUT MATÉRIEL : Échec d'enclenchement du contacteur principal !");
+        return true;
+    }
+
+    return false; // Tout est parfaitement cohérent
 }
 
 void ChargingManager::setMaxCurrent(float amps) {
@@ -113,6 +136,18 @@ String ChargingManager::getStateString() const {
 }
 
 void ChargingManager::update() {
+    // --- SÉCURITÉ CRITIQUE PRIORITAIRE ---
+    if (checkRelayGlueFault()) {
+        if (_state != ChargingState::STATE_E) {
+            _state = ChargingState::STATE_E;
+            digitalWrite(_relayPin, LOW);
+            digitalWrite(_prechargePin, LOW);
+            ledcWrite(_pwmPin, 0); // On coupe complètement le signal CP (0V)
+            _logger.error("ALERTE CRITIQUE : CONTACTEUR COLLÉ / SOUDÉ ! Arrêt d'urgence matériel.");
+        }
+        return; 
+    }
+
     float vcp = readPilotVoltage();
     ChargingState detectedState;
 
@@ -144,29 +179,70 @@ void ChargingManager::update() {
         switch (_state) {
             case ChargingState::STATE_A:
                 digitalWrite(_relayPin, LOW);
-                ledcWrite(_pwmPin, 1023);
-                _logger.info("[État A] Véhicule débranché. Relais ouvert.");
+                digitalWrite(_prechargePin, LOW);
+                ledcWrite(_pwmPin, 1023); // Repos 12V constant
+                
+                // Vérification post-charge immédiate : Les contacts se sont-ils bien ouverts ?
+                delay(50); // Petit temps de relaxation mécanique du contacteur
+                if (checkRelayGlueFault()) {
+                    _state = ChargingState::STATE_E;
+                    ledcWrite(_pwmPin, 0); // Coupure d'urgence du signal CP (0V)
+                    _logger.error("[POST-CHARGE] Alerte : Le véhicule s'est débranché mais le contacteur est resté collé !");
+                } else {
+                    _logger.info("[État A] Véhicule débranché. Sécurité contacteur validée (Ouvert).");
+                }
                 break;
 
             case ChargingState::STATE_B:
                 digitalWrite(_relayPin, LOW);
+                digitalWrite(_prechargePin, LOW);
                 setMaxCurrent(_config.data.maxAmps);
-                _logger.info("[État B] Véhicule détecté. PWM actif à " + String(_config.data.maxAmps) + "A");
+                
+                // Vérification post-charge si la voiture interrompt la charge mais reste branchée
+                delay(50);
+                if (checkRelayGlueFault()) {
+                    _state = ChargingState::STATE_E;
+                    ledcWrite(_pwmPin, 0);
+                    _logger.error("[POST-CHARGE] La charge s'est arrêtée mais le contacteur refuse de s'ouvrir !");
+                } else {
+                    _logger.info("[État B] Véhicule connecté en attente. Sécurité contacteur validée (Ouvert).");
+                }
                 break;
 
             case ChargingState::STATE_C:
                 if (isAuthorized()) {
-                    // --- Séquence de Précharge ---
-                    _logger.info("[État C] Activation de la précharge...");
-                    digitalWrite(_prechargePin, HIGH); // On ferme le petit relais
+                    // VERIFICATION AVANT CHARGE : Le contacteur est-il bien ouvert au repos ?
+                    // On s'assure qu'aucun court-circuit ou problème mécanique n'est présent AVANT d'envoyer la sauce.
+                    if (checkRelayGlueFault()) {
+                        _state = ChargingState::STATE_E;
+                        ledcWrite(_pwmPin, 0);
+                        _logger.error("[PRÉ-CHARGE] Refus de démarrer : Cohérence contacteur invalide au repos !");
+                        break; 
+                    }
+
+                    _logger.info("[État C] Validation contacteur OK. Activation de la précharge...");
                     
-                    delay(500); // On laisse 500ms aux condensateurs de l'OBC pour se charger
+                    // Séquence de démarrage / soft-start
+                    digitalWrite(_prechargePin, HIGH); 
+                    delay(500); // Temps de précharge des condensateurs de la voiture
                     
-                    digitalWrite(_relayPin, HIGH);    // On ferme le contacteur principal (sans arc)
-                    _logger.success("[État C] Charge démarrée (Contacteur principal ON) !");
+                    digitalWrite(_relayPin, HIGH); // Fermeture du contacteur principal
+                    delay(100); // Attente de l'enclenchement mécanique
                     
-                    delay(100); // Petit recouvrement de sécurité
-                    digitalWrite(_prechargePin, LOW); // On peut couper la précharge maintenant
+                    // VERIFICATION PENDANT CHARGE : Est-ce que le contacteur s'est bien fermé ?
+                    if (checkRelayGlueFault()) {
+                        // Si checkRelayGlueFault renvoie true alors qu'on a mis _relayPin à HIGH, 
+                        // c'est que le contact auxiliaire dit qu'il est resté OUVERT (Erreur d'enclenchement)
+                        digitalWrite(_relayPin, LOW);
+                        digitalWrite(_prechargePin, LOW);
+                        _state = ChargingState::STATE_E;
+                        ledcWrite(_pwmPin, 0);
+                        _logger.error("[PRÉ-CHARGE] Échec critique : Le contacteur principal n'a pas réussi à se fermer !");
+                        break;
+                    }
+
+                    digitalWrite(_prechargePin, LOW); // Tout est OK, on coupe la précharge
+                    _logger.success("[État C] Sécurités validées. Contacteur principal ON. Charge active !");
                 } else {
                     digitalWrite(_relayPin, LOW);
                     digitalWrite(_prechargePin, LOW);
@@ -204,4 +280,25 @@ void ChargingManager::update() {
         _state = ChargingState::STATE_B;
         _logger.warn("Autorisation perdue en cours de charge. Relais ouvert.");
     }
+}
+
+
+
+
+void ChargingManager::forceEmergencyStop() {
+    // Si on est déjà en état d'erreur, pas besoin de réappliquer les coupures
+    if (_state == ChargingState::STATE_E) {
+        return;
+    }
+
+    _state = ChargingState::STATE_E;
+    
+    // Coupure matérielle immédiate des GPIO de puissance
+    digitalWrite(_relayPin, LOW);
+    digitalWrite(_prechargePin, LOW);
+    
+    // Arrêt complet du signal PWM (0V permanent au véhicule)
+    ledcWrite(_pwmPin, 0); 
+    
+    _logger.error("[ARRÊT D'URGENCE] Tous les relais sont coupés. Borne verrouillée.");
 }

@@ -25,6 +25,7 @@ public:
     bool isVehicleConnected();
     bool isVehicleRequestingCharge();
     bool isCharging();
+    void forceEmergencyStop();
 
     // ON GARDE JUSTE LA DÉCLARATION (on enlève le { return ... })
     bool isAuthorized() const;
@@ -41,6 +42,9 @@ private:
     int _adcPin;
     int _relayPin;
     int _prechargePin;
+    int _feedbackRelayPin;
+
+    bool checkRelayGlueFault();
     
     float _targetAmps;
     bool _isAuthorized = false;

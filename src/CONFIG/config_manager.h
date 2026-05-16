@@ -11,6 +11,8 @@ struct PinConfig {
     int pp_adc;      
     int relay;
     int precharge;
+    int feedback_relay;
+    int temp_sensors;
     int spi_sck;     
     int spi_miso;    
     int spi_mosi;    
@@ -29,10 +31,13 @@ struct ConfigData {
     String location;
     String ssid;
     String password;
+    String ap_password;
+    String ota_password;
     String mqttServer;
     int maxAmps;
     bool debugMode;
     int num_leds;
+    int temp_max_celsius;
     PinConfig pins;
 };
 

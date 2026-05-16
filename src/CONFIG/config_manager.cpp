@@ -21,12 +21,16 @@ bool ConfigManager::begin() {
     data.location = doc["system"]["location"].as<String>();
     data.ssid = doc["network"]["wifi_ssid"].as<String>();
     data.password = doc["network"]["wifi_pass"].as<String>();
+    data.ap_password = doc["network"]["ap_password"].as<String>();
+    data.ota_password = doc["network"]["ota_password"].as<String>();
     data.mqttServer = doc["network"]["mqtt_server"].as<String>();
     
     // --- Electrical ---
     data.maxAmps = doc["electrical"]["max_current_amps"].as<int>();
     data.debugMode = doc["system"]["debug_mode"].as<bool>();
     data.num_leds = doc["hardware"]["num_leds"].as<int>();
+    data.temp_max_celsius = doc["safety"]["temp_max_celsius"].as<int>();
+   
 
     // --- Mapping Hardware Pins ---
     data.pins.cp_pwm = doc["hardware"]["pin_cp_pwm"].as<int>();
@@ -34,6 +38,8 @@ bool ConfigManager::begin() {
     data.pins.pp_adc = doc["hardware"]["pin_pp_adc"].as<int>();
     data.pins.relay = doc["hardware"]["pin_relay"].as<int>();
     data.pins.precharge = doc["hardware"]["pin_precharge"].as<int>();
+    data.pins.feedback_relay = doc["hardware"]["pin_feedback_relay"].as<int>();
+    data.pins.temp_sensors = doc["hardware"]["pin_temp_sensors"].as<int>();
     
     data.pins.spi_sck = doc["hardware"]["pin_spi_sck"].as<int>();
     data.pins.spi_miso = doc["hardware"]["pin_spi_miso"].as<int>();

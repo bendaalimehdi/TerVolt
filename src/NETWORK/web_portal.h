@@ -9,11 +9,12 @@
 #include "../NETWORK/wifi_manager.h"
 #include "../ENERGY/energy_manager.h"
 #include "../ENERGY/charge_session.h"
+#include "../SAFETY/temperature_manager.h"
 
 
 class WebPortal {
 public:
-    WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi, EnergyManager& energy);
+    WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi, EnergyManager& energy, TemperatureManager& tempManager);
     void begin();
 
 private:
@@ -23,7 +24,7 @@ private:
     ChargingManager& _charger;
     WifiManager& _wifi;
     EnergyManager& _energy;
-
+    TemperatureManager& _tempManager;
     String generateDashboard(); // Génère le HTML dynamique
 };
 

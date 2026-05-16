@@ -8,6 +8,8 @@
 #include "INTERACTION/led_manager.h"
 #include "INTERACTION/rfid.h"
 #include "ENERGY/energy_manager.h"
+#include "SAFETY/temperature_manager.h"
+#include "NETWORK/ota_manager.h"
 
 WiFiClient espClient;
 Logger logger;
@@ -15,12 +17,15 @@ ConfigManager config;
 
 WifiManager wifi(logger, config);
 
+
 ChargingManager charger(logger, config);
 EnergyManager energy(logger, config);
+TemperatureManager tempManager(logger, config);
+OtaManager ota(logger, config);
 
-ServerManager server(logger, config, energy, charger);
+ServerManager server(logger, config, energy, charger, ota);
 
-WebPortal webPortal(logger, config, charger, wifi, energy);
+WebPortal webPortal(logger, config, charger, wifi, energy, tempManager);
 
 LedManager ledStrip(logger, config);
 RfidManager rfid(logger, config);
@@ -46,7 +51,7 @@ void setup() {
     //rfid.begin();
     charger.begin();
     energy.begin();
-
+    
     // 3. Création de la Tâche CHARGE sur le Cœur 1 (Application Core)
     // C'est ici que la sécurité et la norme J1772 sont gérées
     xTaskCreatePinnedToCore(
@@ -81,6 +86,7 @@ void TaskNetwork(void * pvParameters) {
     
     wifi.begin();
     server.begin(espClient);
+    ota.begin();
     webPortal.begin();
 
     unsigned long pressStart = 0;
@@ -100,6 +106,7 @@ void TaskNetwork(void * pvParameters) {
     }
 
         wifi.maintain();
+        ota.handle();
         server.maintain();
 
         if (server.isConnected() && (millis() - lastMsg > 10000)) { 
@@ -116,6 +123,7 @@ void TaskNetwork(void * pvParameters) {
 // --- COEUR 1 : GESTION DE LA CHARGE & SÉCURITÉ ---
 void TaskCharging(void * pvParameters) {
     logger.info("Task Charging démarrée sur Coeur 1");
+    tempManager.begin();
 
     for(;;) {
         // Lecture RFID
@@ -124,6 +132,13 @@ void TaskCharging(void * pvParameters) {
         //    logger.info("Badge détecté : " + uid);
             // Logique d'autorisation...
         //}
+        tempManager.update();
+        
+        // 2. Arrêt immédiat de la borne si anomalie thermique détectée
+        if (tempManager.isOverheating()) {
+            charger.forceEmergencyStop(); // Une méthode simple pour ouvrir les relais
+        }
+
         energy.update();
         ChargingState currentState = charger.getState();
 

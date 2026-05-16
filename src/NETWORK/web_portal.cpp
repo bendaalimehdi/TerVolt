@@ -1,7 +1,7 @@
 #include "web_portal.h"
 
-WebPortal::WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi, EnergyManager& energy) 
-    : _server(80), _logger(logger), _config(config), _charger(charger), _wifi(wifi), _energy(energy) {}
+WebPortal::WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi, EnergyManager& energy, TemperatureManager& tempManager)
+    : _server(80), _logger(logger), _config(config), _charger(charger), _wifi(wifi), _energy(energy), _tempManager(tempManager) {}
 
 void WebPortal::begin() {
     _server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -14,7 +14,6 @@ void WebPortal::begin() {
         
         // État de la borne
         doc["status"] = _charger.getStateString();
-        // doc["target_amps"] = _charger.getTargetAmps();
         
         // Mesures électriques réelles (ATM90E32)
         doc["voltage_a"] = _energy.getVoltageA();
@@ -24,6 +23,13 @@ void WebPortal::begin() {
         doc["voltage_c"] = _energy.getVoltageC();
         doc["current_c"] = _energy.getCurrentC();
         doc["power"] = _energy.activePowerTotal();
+
+        // SÉCURISATION : Extraction passive des températures (Pas de collision inter-cœurs)
+        doc["temp_l1"] = _tempManager.getTerminalTemp(1);
+        doc["temp_l2"] = _tempManager.getTerminalTemp(2);
+        doc["temp_l3"] = _tempManager.getTerminalTemp(3);
+        doc["temp_esp"] = _tempManager.getInternalESPTemp(); // S'assurer que cette méthode renvoie _tempESP dans le .cpp
+        doc["overheating"] = _tempManager.isOverheating();
         
         // Infos système
         doc["device_id"] = _config.data.deviceId;
@@ -39,16 +45,6 @@ void WebPortal::begin() {
         serializeJson(doc, response);
         request->send(200, "application/json", response);
     });
-
-    // --- ROUTE : Contrôle (Actionner le relais / Changer Ampères) ---
-    // _server.on("/api/control", HTTP_POST, [this](AsyncWebServerRequest *request) {
-    //     if (request->hasParam("amps", true)) {
-    //         float amps = request->getParam("amps", true)->value().toFloat();
-    //         _charger.setTargetAmps(amps);
-    //         _logger.info("WebPortal: Courant modifié via UI -> " + String(amps) + "A");
-    //     }
-    //     request->send(200, "application/json", "{\"result\":\"ok\"}");
-    // });
 
     _server.begin();
     _logger.success("Portail Web de production lancé sur le port 80");
@@ -272,6 +268,15 @@ String WebPortal::generateDashboard() {
             <div class="row"><span class="label">Status charge</span><span class="badge %CHARGE_CLASS%">%CHARGE_STATUS%</span></div>
         </section>
 
+        <section class="card">
+            <h2>Sécurité Thermique</h2>
+            <div class="row"><span class="label">Température Borne (ESP32)</span><span class="value" id="temp_esp">-- °C</span></div>
+            <div class="row"><span class="label">Bornier Phase L1</span><span class="value" id="temp_l1">-- °C</span></div>
+            <div class="row"><span class="label">Bornier Phase L2</span><span class="value" id="temp_l2">-- °C</span></div>
+            <div class="row"><span class="label">Bornier Phase L3</span><span class="value" id="temp_l3">-- °C</span></div>
+            <div class="row"><span class="label">Statut Thermique</span><span class="badge green" id="thermal_status">NOMINAL</span></div>
+        </section>
+
     </main>
 
     <button onclick="updateStatus()">ACTUALISER LES DONNÉES</button>
@@ -301,20 +306,48 @@ String WebPortal::generateDashboard() {
 
                 document.getElementById('state').textContent = data.status;
                 document.getElementById('ip').textContent = data.ip;
-                document.getElementById('rssi').textContent = data.rssi + ' dBm';
+                
+                // Rafraîchissement asynchrone sécurisé du RSSI
+                const rssiElt = document.getElementById('rssi');
+                rssiElt.textContent = data.rssi + ' dBm';
+                if (data.rssi > -60) {
+                    rssiElt.className = 'badge green';
+                } else if (data.rssi > -75) {
+                    rssiElt.className = 'badge orange';
+                } else {
+                    rssiElt.className = 'badge red';
+                }
+
+                // Affichage fluide des températures
+                document.getElementById('temp_esp').textContent = data.temp_esp.toFixed(1) + ' °C';
+                document.getElementById('temp_l1').textContent = data.temp_l1.toFixed(1) + ' °C';
+                document.getElementById('temp_l2').textContent = data.temp_l2.toFixed(1) + ' °C';
+                document.getElementById('temp_l3').textContent = data.temp_l3.toFixed(1) + ' °C';
+                
+                const thermalElt = document.getElementById('thermal_status');
+                if (data.overheating) {
+                    thermalElt.textContent = 'Surchauffe';
+                    thermalElt.className = 'badge red';
+                } else {
+                    thermalElt.textContent = 'Normal';
+                    thermalElt.className = 'badge green';
+                }
             } catch (error) {
                 console.error('Erreur API:', error);
             }
         }
 
-        updateStatus();
-        setInterval(updateStatus, 5000);
+        // Lancement immédiat au chargement de la page pour écraser les valeurs par défaut
+        window.addEventListener('DOMContentLoaded', () => {
+            updateStatus();
+            setInterval(updateStatus, 5000);
+        });
     </script>
 </body>
 </html>
 )rawliteral";
 
-    int rssi = WiFi.RSSI();
+    int rssi = _wifi.getSignalStrength(); // CORRECTION : Utilisation cohérente du manager réseau
     String rssiClass = (rssi > -60) ? "green" : (rssi > -75 ? "orange" : "red");
 
     bool relayOn = digitalRead(_config.data.pins.relay);

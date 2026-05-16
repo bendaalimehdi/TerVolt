@@ -62,7 +62,17 @@ bool WifiManager::isConnected() {
 }
 
 String WifiManager::getIP() {
-    return WiFi.localIP().toString();
+    if (WiFi.status() == WL_CONNECTED) {
+        return WiFi.localIP().toString();
+    }
+    
+    // Si l'ESP32 a activé son propre Point d'Accès (Mode AP) car la box est inaccessible
+    if (_apMode || (WiFi.getMode() == WIFI_AP) || (WiFi.getMode() == WIFI_AP_STA)) {
+        return WiFi.softAPIP().toString(); 
+    }
+
+    // Fallback par défaut si rien n'est encore initialisé
+    return "0.0.0.0";
 }
 
 int WifiManager::getSignalStrength() {
@@ -75,14 +85,21 @@ int WifiManager::getSignalStrength() {
 
 // Dans wifi_manager.cpp
 void WifiManager::startAP() {
-    WiFi.mode(WIFI_AP);
+    WiFi.mode(WIFI_AP_STA);
+
     WiFi.softAPConfig(_apIP, _gateway, _subnet);
     // Le nom du réseau inclut l'ID de la borne pour la reconnaître
-    String apName = "TerVolt-Config-" + WiFi.macAddress().substring(12);
-    WiFi.softAP(apName.c_str(), "admin1234"); // Mot de passe par défaut
+    String apName = "TerVolt-Config-" + _config.data.deviceId;
+    String apPassword = _config.data.ap_password;
+    if (apPassword.length() < 8) {
+        apPassword = "AdminTerVolt2026!"; 
+        _logger.warn("Mot de passe AP invalide ou trop court dans config.json. Utilisation du mot de passe de secours.");
+    }
+    WiFi.softAP(apName.c_str(), apPassword.c_str());
     _apMode = true;
     _logger.success("Mode AP activé. SSID: " + apName);
     _logger.info("IP Statique : 192.168.4.1");
+    WiFi.begin(_config.data.ssid.c_str(), _config.data.password.c_str());
 }
 
 void WifiManager::stopAP() {
