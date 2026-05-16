@@ -8,12 +8,18 @@ ChargingManager::ChargingManager(Logger& logger, ConfigManager& config)
     _pwmPin = _config.data.pins.cp_pwm;   
     _adcPin = _config.data.pins.cp_adc;   
     _relayPin = _config.data.pins.relay;
+    _prechargePin = _config.data.pins.precharge;
 }
 
 void ChargingManager::begin() {
     _pwmPin = _config.data.pins.cp_pwm;   
     _adcPin = _config.data.pins.cp_adc;   
     _relayPin = _config.data.pins.relay;
+    _prechargePin = _config.data.pins.precharge;
+    
+        // Configuration des pins
+        pinMode(_adcPin, INPUT);
+        pinMode(_prechargePin, OUTPUT);
 
     if (_relayPin != 0) { // Sécurité
         pinMode(_relayPin, OUTPUT);
@@ -150,17 +156,34 @@ void ChargingManager::update() {
 
             case ChargingState::STATE_C:
                 if (isAuthorized()) {
-                    digitalWrite(_relayPin, HIGH);
-                    _logger.success("[État C] Charge démarrée !");
+                    // --- Séquence de Précharge ---
+                    _logger.info("[État C] Activation de la précharge...");
+                    digitalWrite(_prechargePin, HIGH); // On ferme le petit relais
+                    
+                    delay(500); // On laisse 500ms aux condensateurs de l'OBC pour se charger
+                    
+                    digitalWrite(_relayPin, HIGH);    // On ferme le contacteur principal (sans arc)
+                    _logger.success("[État C] Charge démarrée (Contacteur principal ON) !");
+                    
+                    delay(100); // Petit recouvrement de sécurité
+                    digitalWrite(_prechargePin, LOW); // On peut couper la précharge maintenant
                 } else {
                     digitalWrite(_relayPin, LOW);
+                    digitalWrite(_prechargePin, LOW);
                     _logger.warn("[État C] Véhicule demande la charge mais non autorisé.");
                 }
                 break;
 
             case ChargingState::STATE_D:
-                digitalWrite(_relayPin, HIGH);
-                _logger.warn("[État D] Ventilation requise — Air libre. Relais fermé.");
+                // Même séquence si ventilation requise
+                if (isAuthorized()) {
+                    digitalWrite(_prechargePin, HIGH);
+                    delay(500);
+                    digitalWrite(_relayPin, HIGH);
+                    delay(100);
+                    digitalWrite(_prechargePin, LOW);
+                    _logger.warn("[État D] Ventilation requise — Charge activée.");
+                }
                 break;
 
             case ChargingState::STATE_E:

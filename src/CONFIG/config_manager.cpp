@@ -33,6 +33,7 @@ bool ConfigManager::begin() {
     data.pins.cp_adc = doc["hardware"]["pin_cp_adc"].as<int>();
     data.pins.pp_adc = doc["hardware"]["pin_pp_adc"].as<int>();
     data.pins.relay = doc["hardware"]["pin_relay"].as<int>();
+    data.pins.precharge = doc["hardware"]["pin_precharge"].as<int>();
     
     data.pins.spi_sck = doc["hardware"]["pin_spi_sck"].as<int>();
     data.pins.spi_miso = doc["hardware"]["pin_spi_miso"].as<int>();

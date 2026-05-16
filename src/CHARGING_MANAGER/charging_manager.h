@@ -40,6 +40,7 @@ private:
     int _pwmPin;
     int _adcPin;
     int _relayPin;
+    int _prechargePin;
     
     float _targetAmps;
     bool _isAuthorized = false;

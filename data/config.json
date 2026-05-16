@@ -10,9 +10,9 @@
     "debug_mode": true
   },
   "network": {
-    "wifi_ssid": "Livebox-57C0_kon",
-    "wifi_pass": "Designclic94270+",
-    "mqtt_server": "192.168.1.30",
+    "wifi_ssid": "BboxM",
+    "wifi_pass": "Midi2210@bbox",
+    "mqtt_server": "192.168.1.119",
     "mqtt_port": 1883,
     "mqtt_user": "tervolt_admin",
     "mqtt_pass": "MqttAuthPwd",
@@ -23,7 +23,9 @@
     "pin_cp_pwm": 13,
     "pin_cp_adc": 14,
     "pin_pp_adc": 15,
-    "pin_relay": 4,
+    "pin_relay": 1,
+    "pin_precharge": 2,
+    "pin_feedback_relay": 42,
     "pin_spi_sck": 10,
     "pin_spi_miso": 12,
     "pin_spi_mosi": 11,

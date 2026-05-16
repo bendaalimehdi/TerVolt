@@ -10,6 +10,7 @@ struct PinConfig {
     int cp_adc;
     int pp_adc;      
     int relay;
+    int precharge;
     int spi_sck;     
     int spi_miso;    
     int spi_mosi;    
