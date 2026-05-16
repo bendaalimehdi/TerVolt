@@ -23,7 +23,7 @@ EnergyManager energy(logger, config);
 TemperatureManager tempManager(logger, config);
 OtaManager ota(logger, config);
 
-ServerManager server(logger, config, energy, charger, ota);
+ServerManager server(logger, config, energy, charger, ota, tempManager);
 
 WebPortal webPortal(logger, config, charger, wifi, energy, tempManager);
 

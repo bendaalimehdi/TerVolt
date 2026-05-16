@@ -1,12 +1,13 @@
 #include "server_manager.h"
 #include <LittleFS.h>
 
-ServerManager::ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger, OtaManager& otaManager)
-    : _logger(logger), _config(config), _energy(energy), _charger(charger), _otaManager(otaManager), _client() {}
+ServerManager::ServerManager(Logger& logger, ConfigManager& config, EnergyManager& energy, ChargingManager& charger, OtaManager& otaManager,TemperatureManager& tempManager)
+    : _logger(logger), _config(config), _energy(energy), _charger(charger), _otaManager(otaManager), _tempManager(tempManager), _client() {}
 
 void ServerManager::begin(WiFiClient& espClient) {
     _client.setClient(espClient);
     _client.setServer(_config.data.mqttServer.c_str(), 1883);
+    _client.setBufferSize(1024);
     _client.setCallback([this](char* topic, byte* payload, unsigned int length) {
         this->handleCallback(topic, payload, length);
     });
@@ -86,37 +87,56 @@ void ServerManager::maintain() {
 }
 
 void ServerManager::publishFullStatus() {
-    if (!_client.connected()) return;
-
-    JsonDocument doc;
-    
-    doc["from"] = _config.data.deviceId; // Indique quelle borne parle
-    doc["type"] = "status";
-    doc["state"] = _charger.getStateString();
-    
-    // Mesures temps réel
-    doc["v_a"] = _energy.getVoltageA();
-    doc["i_a"] = _energy.getCurrentA();
-    doc["v_b"] = _energy.getVoltageB();
-    doc["i_b"] = _energy.getCurrentB();
-    doc["v_c"] = _energy.getVoltageC();
-    doc["i_c"] = _energy.getCurrentC(); 
-
-    doc["p"] = _energy.activePowerTotal();
-    
-
-    // Données de session en cours
-    if (_energy.session.isActive()) {
-        doc["session_kwh"] = _energy.session.getSessionEnergyKwh();
-        doc["duration"] = _energy.session.getDurationSec();
+    if (!isConnected()) {
+        _logger.warn("MQTT : Impossible de publier, client déconnecté.");
+        return;
     }
 
-    String buffer;
-    serializeJson(doc, buffer);
-    String topic = "tervolt/" + _config.data.deviceId;
-    _client.publish(topic.c_str(), buffer.c_str());
-}
+    JsonDocument doc;
 
+    // 1. Base
+    doc["device_id"] = _config.data.deviceId;
+    doc["from"] = _config.data.deviceId; 
+    doc["uptime_s"] = millis() / 1000;
+    doc["ip"] = WiFi.localIP().toString();
+    doc["rssi"] = WiFi.RSSI();
+
+    // 2. Énergie Triphasée ( ATM90E32 ) - Utilise le même format que ton WebPortal
+    doc["voltage_a"] = _energy.getVoltageA();
+    doc["current_a"] = _energy.getCurrentA();
+    doc["voltage_b"] = _energy.getVoltageB();
+    doc["current_b"] = _energy.getCurrentB();
+    doc["voltage_c"] = _energy.getVoltageC();
+    doc["current_c"] = _energy.getCurrentC();
+    doc["power"] = _energy.activePowerTotal();
+    
+    // Énergie de la session en cours
+    doc["session_kwh"] = _energy.session.getSessionEnergyKwh();
+
+    // 3. Logique de charge J1772
+    doc["charge_state"] = _charger.getStateString();
+    // Lecture physique de la pin du relais à la place de la méthode manquante
+    doc["relay_status"] = digitalRead(_config.data.pins.relay) ? "ON" : "OFF";
+    doc["max_allocated_amps"] = _config.data.maxAmps;
+
+    // 4. Sécurité Thermique
+    doc["temperature_esp"] = _tempManager.getInternalESPTemp();
+    doc["temp_l1"] = _tempManager.getTerminalTemp(1);
+    doc["temp_l2"] = _tempManager.getTerminalTemp(2);
+    doc["temp_l3"] = _tempManager.getTerminalTemp(3);
+    doc["overheating"] = _tempManager.isOverheating();
+
+    String payload;
+    serializeJson(doc, payload);
+
+    String topic = "tervolt/" + _config.data.deviceId;
+
+    if (_client.publish(topic.c_str(), payload.c_str())) {
+        _logger.success("MQTT Télémétrie envoyée !");
+    } else {
+        _logger.error("MQTT Télémétrie : Échec de l'envoi.");
+    }
+}
 bool ServerManager::isConnected() {
     return _client.connected();
 }
