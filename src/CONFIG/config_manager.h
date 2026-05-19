@@ -5,6 +5,12 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 
+struct ProbeConfig {
+    String pcb_esp;
+    String pcb_energy;
+    String contacteur;
+};
+
 struct PinConfig {
     int cp_pwm;
     int cp_adc;
@@ -21,8 +27,8 @@ struct PinConfig {
     int energy_cs;   
     int led_rgb;
     int btn_config;
-    int rcm_fault;
-    int rcm_test;
+    int pin_rcm_fault;
+    int pin_rcm_test;
 };
 
 struct ConfigData {
@@ -38,6 +44,7 @@ struct ConfigData {
     bool debugMode;
     int num_leds;
     int temp_max_celsius;
+    ProbeConfig probes;
     PinConfig pins;
 };
 
@@ -47,6 +54,7 @@ class ConfigManager {
 public:
     ConfigManager();
     bool begin();
+    bool save();
     ConfigData data;
 private:
     const char* _path = "/config.json";

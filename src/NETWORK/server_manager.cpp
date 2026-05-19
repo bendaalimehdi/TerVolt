@@ -120,11 +120,12 @@ void ServerManager::publishFullStatus() {
     doc["max_allocated_amps"] = _config.data.maxAmps;
 
     // 4. Sécurité Thermique
-    doc["temperature_esp"] = _tempManager.getInternalESPTemp();
-    doc["temp_l1"] = _tempManager.getTerminalTemp(1);
-    doc["temp_l2"] = _tempManager.getTerminalTemp(2);
-    doc["temp_l3"] = _tempManager.getTerminalTemp(3);
-    doc["overheating"] = _tempManager.isOverheating();
+    // --- MISE À JOUR DES TEMPÉRATURES DANS LE PAYLOAD MQTT ---
+    doc["temperature_esp"] = _tempManager.getInternalSiliconTemp(); // Température silicium de la puce
+    doc["temp_l1"]          = _tempManager.getPcbEspTemp();         // Température ambiante carte mère
+    doc["temp_l2"]          = _tempManager.getPcbEnergyTemp();      // Température PCB ATM90
+    doc["temp_l3"]          = _tempManager.getContacteurTemp();     // Température côté puissance
+    doc["overheating"]      = _tempManager.isOverheating();         // Flag de sécurité (true/false)
 
     String payload;
     serializeJson(doc, payload);

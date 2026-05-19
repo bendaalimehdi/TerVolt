@@ -41,6 +41,12 @@
     "pin_rcm_fault": 38,
     "pin_rcm_test": 39
   },
+
+  "probes": {
+    "pcb_esp": "",
+    "pcb_energy": "",
+    "contacteur": ""
+  },
  
   "electrical": {
     "max_current_amps": 32,

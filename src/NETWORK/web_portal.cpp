@@ -25,10 +25,10 @@ void WebPortal::begin() {
         doc["power"] = _energy.activePowerTotal();
 
         // SÉCURISATION : Extraction passive des températures (Pas de collision inter-cœurs)
-        doc["temp_l1"] = _tempManager.getTerminalTemp(1);
-        doc["temp_l2"] = _tempManager.getTerminalTemp(2);
-        doc["temp_l3"] = _tempManager.getTerminalTemp(3);
-        doc["temp_esp"] = _tempManager.getInternalESPTemp(); // S'assurer que cette méthode renvoie _tempESP dans le .cpp
+        doc["temp_l1"] = _tempManager.getPcbEspTemp();         // Température ambiante carte mère
+        doc["temp_l2"] = _tempManager.getPcbEnergyTemp();      // Température PCB ATM90
+        doc["temp_l3"] = _tempManager.getContacteurTemp();
+        doc["temp_esp"] = _tempManager.getInternalSiliconTemp(); // S'assurer que cette méthode renvoie _tempESP dans le .cpp
         doc["overheating"] = _tempManager.isOverheating();
         
         // Infos système

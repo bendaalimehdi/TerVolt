@@ -19,6 +19,10 @@ void Logger::error(String message) {
     Serial.println("[ERROR] !!! " + message + " !!!"); 
 }
 
+void Logger::critical(String message) { 
+    Serial.println("[CRITICAL] !!! " + message + " !!!"); 
+}
+
 void Logger::success(String message) { 
     Serial.println("[OK] " + message); 
 }

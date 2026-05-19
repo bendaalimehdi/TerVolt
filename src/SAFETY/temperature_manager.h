@@ -16,8 +16,11 @@ public:
     void begin();
     void update();
 
-    float getTerminalTemp(int phase);
-    float getInternalESPTemp();
+    // Accesseurs mis à jour avec tes nouveaux emplacements physiques
+    float getPcbEspTemp();
+    float getPcbEnergyTemp();
+    float getContacteurTemp();
+    float getInternalSiliconTemp();
 
     bool isOverheating();
 
@@ -29,9 +32,10 @@ private:
     OneWire* _oneWire;
     DallasTemperature* _sensors;
 
-    float _tempL1;
-    float _tempL2;
-    float _tempL3;
+    // Températures lues
+    float _tempPcbEsp;
+    float _tempPcbEnergy;
+    float _tempContacteur;
     float _tempESP;
 
     unsigned long _lastReadTime;
@@ -39,7 +43,10 @@ private:
 
     temperature_sensor_handle_t _espTempSensor;
 
+    // Méthodes privées utilitaires
     float readInternalSiliconTemp();
+    String addressToString(DeviceAddress deviceAddress);
+    bool stringToAddress(const String& addressStr, DeviceAddress deviceAddress);
 };
 
 #endif

@@ -1,59 +1,156 @@
 #include "config_manager.h"
 
-ConfigManager::ConfigManager() {}
+ConfigManager::ConfigManager() {
+    // Initialisation par défaut si LittleFS échoue
+    data.deviceId = "TERVOLT-ESP32-GENERIC";
+    data.maxAmps = 16;
+    data.debugMode = false;
+    data.num_leds = 1;
+    data.temp_max_celsius = 75;
+    
+    // Initialisation des adresses de sondes vides
+    data.probes.pcb_esp = "";
+    data.probes.pcb_energy = "";
+    data.probes.contacteur = "";
+}
 
 bool ConfigManager::begin() {
-    if (!LittleFS.begin(true)) return false;
+    if (!LittleFS.begin(true)) {
+        Serial.println("❌ [ConfigManager] Erreur d'initialisation de LittleFS");
+        return false;
+    }
+
+    if (!LittleFS.exists(_path)) {
+        Serial.println("⚠️ [ConfigManager] Le fichier config.json n'existe pas. Création par défaut...");
+        return save(); // Crée un fichier de base
+    }
 
     File file = LittleFS.open(_path, "r");
-    if (!file) return false;
+    if (!file) {
+        Serial.println("❌ [ConfigManager] Impossible d'ouvrir le fichier config.json en lecture");
+        return false;
+    }
 
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
     if (error) {
+        Serial.print("❌ [ConfigManager] Erreur de parsing du JSON: ");
+        Serial.println(error.c_str());
+        return false;
+    }
+
+    // --- PARSING SECTION : SYSTEM & NETWORK ---
+    data.deviceId      = doc["system"]["device_id"] | "TERVOLT-ESP32-GENERIC";
+    data.customer_name = doc["system"]["customer_name"] | "Inconnu";
+    data.location      = doc["system"]["location"] | "Non localisé";
+    data.debugMode     = doc["system"]["debug_mode"] | false;
+
+    data.ssid          = doc["network"]["wifi_ssid"] | "";
+    data.password      = doc["network"]["wifi_pass"] | "";
+    data.ap_password   = doc["network"]["ap_password"] | "123456789";
+    data.mqttServer    = doc["network"]["mqtt_server"] | "broker.hivemq.com";
+    data.ota_password  = doc["network"]["ota_password"] | "admin";
+
+    // --- PARSING SECTION : HARDWARE (PINS) ---
+    data.pins.cp_pwm         = doc["hardware"]["pin_cp_pwm"] | -1;
+    data.pins.cp_adc         = doc["hardware"]["pin_cp_adc"] | -1;
+    data.pins.pp_adc         = doc["hardware"]["pin_pp_adc"] | -1;
+    data.pins.relay          = doc["hardware"]["pin_relay"] | -1;
+    data.pins.precharge      = doc["hardware"]["pin_precharge"] | -1;
+    data.pins.feedback_relay = doc["hardware"]["pin_feedback_relay"] | -1;
+    data.pins.temp_sensors   = doc["hardware"]["pin_temp_sensors"] | 18;
+    data.pins.spi_sck        = doc["hardware"]["pin_spi_sck"] | -1;
+    data.pins.spi_miso       = doc["hardware"]["pin_spi_miso"] | -1;
+    data.pins.spi_mosi       = doc["hardware"]["pin_spi_mosi"] | -1;
+    data.pins.energy_cs      = doc["hardware"]["pin_atm90_cs"] | -1;
+    data.pins.led_rgb        = doc["hardware"]["pin_led_strip"] | -1;
+    data.pins.rfid_ss        = doc["hardware"]["pin_rfid_ss"] | -1;
+    data.pins.rfid_rst       = doc["hardware"]["pin_rfid_rst"] | -1;
+    data.pins.btn_config     = doc["hardware"]["pin_btn_config"] | -1; // Fallback pour ton bouton
+    data.pins.pin_rcm_fault  = doc["hardware"]["pin_rcm_fault"] | 38;
+    data.pins.pin_rcm_test   = doc["hardware"]["pin_rcm_test"] | 39;
+
+    // --- PARSING SECTION : SAFETY & ACCESSOIRES ---
+    data.temp_max_celsius = doc["safety"]["temp_max_celsius"] | 75;
+    data.maxAmps          = doc["safety"]["max_current_amps"] | 16;
+    data.num_leds         = doc["hardware"]["num_leds"] | 1; // S'il migre dans le JSON
+
+    // --- PARSING SECTION : PROBES (AUTO-APPRENTISSAGE) ---
+    data.probes.pcb_esp    = doc["probes"]["pcb_esp"].as<String>();
+    data.probes.pcb_energy = doc["probes"]["pcb_energy"].as<String>();
+    data.probes.contacteur = doc["probes"]["contacteur"].as<String>();
+
+    Serial.println("💾 [ConfigManager] Fichier config.json chargé avec succès.");
+    return true;
+}
+
+bool ConfigManager::save() {
+    File file = LittleFS.open(_path, "w");
+    if (!file) {
+        Serial.println("❌ [ConfigManager] Impossible d'ouvrir le fichier config.json en écriture");
+        return false;
+    }
+
+    JsonDocument doc;
+
+    // --- SÉRIALISATION : SYSTEM ---
+    doc["system"]["device_id"]         = data.deviceId;
+    doc["system"]["customer_name"]     = data.customer_name;
+    doc["system"]["location"]          = data.location;
+    doc["system"]["debug_mode"]        = data.debugMode;
+    doc["system"]["version"]           = "1.0.0"; // Valeurs constantes du JSON d'origine
+    doc["system"]["customer_id"]       = "CUST-2024-001";
+    doc["system"]["customer_category"] = "Hotel";
+    doc["system"]["customer_type"]     = "B2B";
+
+    // --- SÉRIALISATION : NETWORK ---
+    doc["network"]["wifi_ssid"]    = data.ssid;
+    doc["network"]["wifi_pass"]    = data.password;
+    doc["network"]["ap_password"]  = data.ap_password;
+    doc["network"]["mqtt_server"]  = data.mqttServer;
+    doc["network"]["mqtt_port"]    = 1883; // Standard MQTT
+    doc["network"]["mqtt_user"]    = "tervolt_admin";
+    doc["network"]["mqtt_pass"]    = "SecureVolt2024";
+    doc["network"]["ntp_server"]   = "pool.ntp.org";
+    doc["network"]["ota_password"] = data.ota_password;
+
+    // --- SÉRIALISATION : HARDWARE ---
+    doc["hardware"]["pin_cp_pwm"]         = data.pins.cp_pwm;
+    doc["hardware"]["pin_cp_adc"]         = data.pins.cp_adc;
+    doc["hardware"]["pin_pp_adc"]         = data.pins.pp_adc;
+    doc["hardware"]["pin_relay"]          = data.pins.relay;
+    doc["hardware"]["pin_precharge"]      = data.pins.precharge;
+    doc["hardware"]["pin_feedback_relay"] = data.pins.feedback_relay;
+    doc["hardware"]["pin_temp_sensors"]   = data.pins.temp_sensors;
+    doc["hardware"]["pin_spi_sck"]        = data.pins.spi_sck;
+    doc["hardware"]["pin_spi_miso"]       = data.pins.spi_miso; // Utilise la correspondance matérielle brute
+    doc["hardware"]["pin_spi_mosi"]       = data.pins.spi_mosi;
+    doc["hardware"]["pin_atm90_cs"]       = data.pins.energy_cs;
+    doc["hardware"]["pin_led_strip"]      = data.pins.led_rgb;
+    doc["hardware"]["pin_rfid_ss"]        = data.pins.rfid_ss;
+    doc["hardware"]["pin_rfid_rst"]       = data.pins.rfid_rst;
+    doc["hardware"]["pin_rcm_fault"]      = data.pins.pin_rcm_fault;
+    doc["hardware"]["pin_rcm_test"]       = data.pins.pin_rcm_test;
+    doc["hardware"]["num_leds"]           = data.num_leds;
+
+    // --- SÉRIALISATION : SAFETY ---
+    doc["safety"]["temp_max_celsius"] = data.temp_max_celsius;
+    doc["safety"]["max_current_amps"] = data.maxAmps;
+
+    // --- SÉRIALISATION : PROBES ---
+    doc["probes"]["pcb_esp"]    = data.probes.pcb_esp;
+    doc["probes"]["pcb_energy"] = data.probes.pcb_energy;
+    doc["probes"]["contacteur"] = data.probes.contacteur;
+
+    if (serializeJson(doc, file) == 0) {
+        Serial.println("❌ [ConfigManager] Échec de la sérialisation du JSON");
         file.close();
         return false;
     }
 
-    // --- System & Network ---
-    data.deviceId = doc["system"]["device_id"].as<String>();
-    data.customer_name = doc["system"]["customer_name"].as<String>(); 
-    data.location = doc["system"]["location"].as<String>();
-    data.ssid = doc["network"]["wifi_ssid"].as<String>();
-    data.password = doc["network"]["wifi_pass"].as<String>();
-    data.ap_password = doc["network"]["ap_password"].as<String>();
-    data.ota_password = doc["network"]["ota_password"].as<String>();
-    data.mqttServer = doc["network"]["mqtt_server"].as<String>();
-    
-    // --- Electrical ---
-    data.maxAmps = doc["electrical"]["max_current_amps"].as<int>();
-    data.debugMode = doc["system"]["debug_mode"].as<bool>();
-    data.num_leds = doc["hardware"]["num_leds"].as<int>();
-    data.temp_max_celsius = doc["safety"]["temp_max_celsius"].as<int>();
-   
-
-    // --- Mapping Hardware Pins ---
-    data.pins.cp_pwm = doc["hardware"]["pin_cp_pwm"].as<int>();
-    data.pins.cp_adc = doc["hardware"]["pin_cp_adc"].as<int>();
-    data.pins.pp_adc = doc["hardware"]["pin_pp_adc"].as<int>();
-    data.pins.relay = doc["hardware"]["pin_relay"].as<int>();
-    data.pins.precharge = doc["hardware"]["pin_precharge"].as<int>();
-    data.pins.feedback_relay = doc["hardware"]["pin_feedback_relay"].as<int>();
-    data.pins.temp_sensors = doc["hardware"]["pin_temp_sensors"].as<int>();
-    
-    data.pins.spi_sck = doc["hardware"]["pin_spi_sck"].as<int>();
-    data.pins.spi_miso = doc["hardware"]["pin_spi_miso"].as<int>();
-    data.pins.spi_mosi = doc["hardware"]["pin_spi_mosi"].as<int>();
-    
-    data.pins.rfid_ss = doc["hardware"]["pin_rfid_ss"].as<int>();
-    data.pins.rfid_rst = doc["hardware"]["pin_rfid_rst"].as<int>();
-    data.pins.energy_cs = doc["hardware"]["pin_energy_cs"].as<int>();
-    
-    data.pins.led_rgb = doc["hardware"]["pin_led_rgb"].as<int>();
-    data.pins.btn_config = doc["hardware"]["pin_btn_config"].as<int>();
-    data.pins.rcm_fault = doc["hardware"]["pin_rcm_fault"].as<int>();
-    data.pins.rcm_test = doc["hardware"]["pin_rcm_test"].as<int>();
-
     file.close();
+    Serial.println("💾 [ConfigManager] Fichier config.json sauvegardé sur LittleFS.");
     return true;
 }

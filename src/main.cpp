@@ -9,6 +9,7 @@
 #include "INTERACTION/rfid.h"
 #include "ENERGY/energy_manager.h"
 #include "SAFETY/temperature_manager.h"
+#include "SAFETY/rcm_manager.h"
 #include "NETWORK/ota_manager.h"
 
 WiFiClient espClient;
@@ -29,7 +30,7 @@ WebPortal webPortal(logger, config, charger, wifi, energy, tempManager);
 
 LedManager ledStrip(logger, config);
 RfidManager rfid(logger, config);
-
+RcmManager rcm(logger, config);
 // Prototypes des fonctions de tâches
 void TaskNetwork(void * pvParameters);
 void TaskCharging(void * pvParameters);
@@ -39,14 +40,35 @@ TaskHandle_t TaskNetworkHandle = NULL;
 
 void setup() {
     Serial.begin(115200);
+    delay(500); // Petit délai de courtoisie pour stabiliser la tension et le moniteur série
     
+    // Initialisation du système de log (si applicable dans ton architecture)
+    logger.begin(); 
+
     // 1. Initialisation de la configuration 
     if (!config.begin()) {
         logger.error("Echec config - Verifier LittleFS");
         return;
     }
 
-    // 2. Initialisation des périphériques
+    // Initialisation des broches matérielles du RCM (GPIO 38 et 39)
+    rcm.begin();
+
+    // EXÉCUTION ET VÉRIFICATION DE L'AUTO-TEST MATÉRIEL
+    // Si l'auto-test échoue (renvoie false), on verrouille la borne immédiatement
+    if (!rcm.triggerSelfTest()) { 
+        if (config.data.debugMode) {
+            logger.warn("[DEV MODE] L'auto-test du RCM a échoué, mais le blocage est ignoré.");
+        } else {
+            logger.critical("CRITICAL : L'auto-test du RCM a échoué ! Système bloqué pour sécurité.");
+            // Boucle de sécurité infinie en mode production
+            while(true) { 
+                vTaskDelay(1000 / portTICK_PERIOD_MS); 
+            }
+        }
+    }
+
+    // 2. Initialisation des autres périphériques (si l'auto-test est validé)
     //ledStrip.begin();
     //rfid.begin();
     charger.begin();
