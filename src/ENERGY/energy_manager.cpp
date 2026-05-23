@@ -68,3 +68,24 @@ void EnergyManager::update() {
     session.update(_activePowerTotal);
     _lastRead = millis();
 }
+
+void EnergyManager::calibrate(float referenceVoltage, float referenceCurrent) {
+    _logger.warn("[ENERGY] Lancement de la calibration métrologique (ATM90E32)...");
+
+    // 1. Définition des valeurs de référence physiques pour chaque phase
+    _atm90.SetReferenceVoltage(ATM90E32::PHASE_A, referenceVoltage);
+    _atm90.SetReferenceVoltage(ATM90E32::PHASE_B, referenceVoltage);
+    _atm90.SetReferenceVoltage(ATM90E32::PHASE_C, referenceVoltage);
+
+    _atm90.SetReferenceCurrent(ATM90E32::PHASE_A, referenceCurrent);
+    _atm90.SetReferenceCurrent(ATM90E32::PHASE_B, referenceCurrent);
+    _atm90.SetReferenceCurrent(ATM90E32::PHASE_C, referenceCurrent);
+
+    // 2. Exécution des routines automatiques de la bibliothèque
+    // Ces fonctions mesurent l'écart et écrivent directement dans la flash via Preferences
+    _atm90.RunGainCalibration();
+    _atm90.RunOffsetCalibration();
+    _atm90.RunPowerOffsetCalibration();
+
+    _logger.success("[ENERGY] Calibration terminée et sauvegardée de manière permanente pour CS " + String(_config.data.pins.energy_cs));
+}

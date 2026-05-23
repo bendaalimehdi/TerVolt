@@ -10,18 +10,17 @@
     "debug_mode": true
   },
   "network": {
-    "wifi_ssid": "BboxM",
-    "wifi_pass": "Midi2210@bbox",
+    "wifi_ssid": "Livebox-57C0",
+    "wifi_pass": "Designclic94270+",
     "ap_password": "admin1234",
-    "mqtt_server": "192.168.1.119",
+    "mqtt_server": "192.168.1.30",
     "mqtt_port": 1883,
     "mqtt_user": "tervolt_admin",
     "mqtt_pass": "MqttAuthPwd",
     "ntp_server": "pool.ntp.org",
     "ota_password": "TerVoltSecureOta2026!"
-     },
-
-"hardware": {
+  },
+  "hardware": {
     "pin_cp_pwm": 13,
     "pin_cp_adc": 14,
     "pin_pp_adc": 15,
@@ -41,13 +40,11 @@
     "pin_rcm_fault": 38,
     "pin_rcm_test": 39
   },
-
   "probes": {
     "pcb_esp": "",
     "pcb_energy": "",
     "contacteur": ""
   },
- 
   "electrical": {
     "max_current_amps": 32,
     "min_current_amps": 6,

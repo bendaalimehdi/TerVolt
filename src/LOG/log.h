@@ -11,9 +11,10 @@ public:
     void error(String message);
     void success(String message);
     void critical(String message);
-  
+    String getLatestLog() const { return _latestLogStr; }  
 private:
     String getTimestamp(); // Pourrait utiliser le NTP plus tard
+    String _latestLogStr = "Système opérationnel";
 };
 
 #endif

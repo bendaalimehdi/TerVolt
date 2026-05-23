@@ -175,10 +175,10 @@ float TemperatureManager::readInternalSiliconTemp() {
 
 bool TemperatureManager::isOverheating() {
     float maxEspSiliconTemp = _config.data.temp_max_celsius;
-    float maxBoardTemp = 75.0f;       // Seuil max pour PCB ESP et PCB Energy Sense
-    float maxContactorTemp = 80.0f;   // Seuil critique d'échauffement sur le contacteur
+    float maxBoardTemp      = 75.0f;   // Seuil max pour PCB ESP et PCB Energy Sense
+    float maxContactorTemp  = 80.0f;   // Seuil critique d'échauffement sur le contacteur
 
-    // 1. Gestion de l'absence des sondes DS18B20
+    // ─── 1. GESTION DE L'ABSENCE OU DE LA PANNE DES SONDES DS18B20 ──────────────────
     if (isnan(_tempPcbEsp) || isnan(_tempPcbEnergy) || isnan(_tempContacteur)) {
         if (_config.data.debugMode) {
             // Mode DEV : On signale sans bloquer l'exécution ni couper les relais
@@ -187,46 +187,35 @@ bool TemperatureManager::isOverheating() {
                 _logger.warn("[DEV MODE] Une ou plusieurs sondes DS18B20 sont absentes ou déconnectées (NAN).");
                 lastLog = millis();
             }
+            // En mode dev, on ne renvoie pas true ici, on continue pour laisser la borne tourner
         } else {
-            // Mode PROD : Sécurité maximale, arrêt d'urgence immédiat
-            _logger.error("SECURITE : Une ou plusieurs sondes DS18B20 ne repondent plus !");
+            // Mode PROD : Sécurité maximale, arrêt d'urgence immédiat si un fil est coupé
+            _logger.error("SÉCURITÉ CRITIQUE : Une ou plusieurs sondes DS18B20 ne répondent plus !");
             return true;
         }
     }
 
-    // 2. Gestion de l'absence du capteur interne de l'ESP32
-    if (isnan(_tempESP)) {
-        _logger.error("Erreur capteur temperature interne silicon ESP32.");
-        return !_config.data.debugMode; // false en dev (non bloquant), true en prod (bloquant)
-    }
+    // ─── 2. VÉRIFICATION DES SEUILS DE SURCHAUFFE RÉELS ─────────────────────────────
+    // On utilise !isnan() pour s'assurer qu'on ne compare pas une valeur invalide en mode DEV
 
-    // ==========================================================
-    // SURVEILLANCE DES SEUILS THERMIQUES PHYSIQUES
-    // ==========================================================
-
-    // Contrôle Silicon Interne ESP32
-    if (!isnan(_tempESP) && _tempESP > maxEspSiliconTemp) {
-        _logger.error("SURCHAUFFE CRITIQUE SILICON : ESP32 a " + String(_tempESP) + "°C");
+    // A. Surchauffe du microcontrôleur ESP32 (Sonde silicium interne ou dédiée)
+    if (!isnan(_tempPcbEsp) && (_tempPcbEsp >= maxEspSiliconTemp)) {
+        _logger.critical("🚨 SURCHAUFFE : PCB ESP32 à " + String(_tempPcbEsp) + "°C (Max: " + String(maxEspSiliconTemp) + "°C)");
         return true;
     }
 
-    // Contrôle Température Ambiante Boîtier (PCB ESP)
-    if (!isnan(_tempPcbEsp) && _tempPcbEsp > maxBoardTemp) {
-        _logger.error("SURCHAUFFE CRITIQUE INTERNE : PCB ESP32 a " + String(_tempPcbEsp) + "°C");
+    // B. Surchauffe de la carte de métrologie (ATM90E32 / Energy Sense)
+    if (!isnan(_tempPcbEnergy) && (_tempPcbEnergy >= maxBoardTemp)) {
+        _logger.critical("🚨 SURCHAUFFE : PCB Métrologie à " + String(_tempPcbEnergy) + "°C (Max: " + String(maxBoardTemp) + "°C)");
         return true;
     }
 
-    // Contrôle Échauffement Pistes de Mesure (PCB Energy ATM90)
-    if (!isnan(_tempPcbEnergy) && _tempPcbEnergy > maxBoardTemp) {
-        _logger.error("SURCHAUFFE CRITIQUE MESURE : PCB Energy a " + String(_tempPcbEnergy) + "°C");
+    // C. Surchauffe mécanique/électrique sur le contacteur de puissance
+    if (!isnan(_tempContacteur) && (_tempContacteur >= maxContactorTemp)) {
+        _logger.critical("🚨 SURCHAUFFE : Contacteur principal à " + String(_tempContacteur) + "°C (Max: " + String(maxContactorTemp) + "°C)");
         return true;
     }
 
-    // Contrôle Échauffement Bornier de Puissance (Contacteur)
-    if (!isnan(_tempContacteur) && _tempContacteur > maxContactorTemp) {
-        _logger.error("SURCHAUFFE CRITIQUE PUISSANCE : Contacteur a " + String(_tempContacteur) + "°C");
-        return true;
-    }
-
-    return false; // Tout est au frais, RAS !
+    // Tout est nominal, aucune surchauffe détectée
+    return false;
 }

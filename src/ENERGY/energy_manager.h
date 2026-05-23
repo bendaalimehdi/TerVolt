@@ -16,6 +16,8 @@ public:
     void begin();
     void update();
 
+    void calibrate(float referenceVoltage, float referenceCurrent);
+
     float activePowerTotal() const { return _activePowerTotal; }
 
     float getVoltageA() const { return _voltageA; }
