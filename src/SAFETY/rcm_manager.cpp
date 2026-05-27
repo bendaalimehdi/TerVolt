@@ -16,12 +16,12 @@ void RcmManager::begin() {
     }
 
     // 1. Configuration de la pin de défaut (Entrée)
-    pinMode(_rcmPin, INPUT_PULLDOWN);
+    pinMode(_rcmPin, INPUT_PULLUP); // Utilisation d'une résistance de pull-up interne
     attachInterrupt(digitalPinToInterrupt(_rcmPin), RcmManager::handleRcmInterrupt, RISING);
     
     // 2. Configuration de la pin de Test (Sortie)
     pinMode(_testPin, OUTPUT);
-    digitalWrite(_testPin, LOW); // Maintenu à l'état bas en fonctionnement normal
+    digitalWrite(_testPin, HIGH); // Maintenu à l'état bas en fonctionnement normal
     
     _logger.success("RcmManager : Surveillance RCM active (Fault: GPIO " + String(_rcmPin) + ", Test: GPIO " + String(_testPin) + ")");
 }
@@ -43,9 +43,9 @@ bool RcmManager::triggerSelfTest() {
     _faultTriggered = false; 
     
     // Envoi d'une impulsion sur la pin Test pour simuler une fuite de courant interne au RCM
-    digitalWrite(_testPin, HIGH);
-    delay(50); // Le module a généralement besoin de 20 à 40ms pour réagir
     digitalWrite(_testPin, LOW);
+    delay(100); // Le module a généralement besoin de 20 à 40ms pour réagir
+    digitalWrite(_testPin, HIGH);
     
     // On attend un court instant pour laisser l'interruption se déclencher
     delay(20);
