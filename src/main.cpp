@@ -10,12 +10,12 @@
 #include "ENERGY/energy_manager.h"
 #include "SAFETY/temperature_manager.h"
 #include "SAFETY/rcm_manager.h"
-#include "SAFETY/overcurrent_manager.h"      // ✅ NOUVEAU
+#include "SAFETY/overcurrent_manager.h"
 #include "NETWORK/ota_manager.h"
-#include "NETWORK/ntp_manager.h"              // ✅ NOUVEAU
+#include "NETWORK/ntp_manager.h"
 #include "INTERACTION/screen_manager.h"
 #include "SAFETY/watchdog.h"
-#include "SAFETY/diagnostics_manager.h"  // ✅ NOUVEAU
+#include "SAFETY/diagnostics_manager.h"
 
 
 WiFiClient espClient;
@@ -29,12 +29,11 @@ ChargingManager charger(logger, config);
 EnergyManager energy(logger, config);
 TemperatureManager tempManager(logger, config);
 OtaManager ota(logger, config);
-NtpManager ntp(logger, config);                                          // ✅ NOUVEAU
-OvercurrentManager overcurrent(logger, config);                          // ✅ NOUVEAU
-DiagnosticsManager diagnostics(logger, config);                          // ✅ NOUVEAU
+NtpManager ntp(logger, config);
+OvercurrentManager overcurrent(logger, config);
+DiagnosticsManager diagnostics(logger, config);
 
 ServerManager server(logger, config, energy, charger, ota, tempManager);
-
 WebPortal webPortal(logger, config, charger, wifi, energy, tempManager);
 
 LedManager ledStrip(logger, config);
@@ -42,7 +41,7 @@ RfidManager rfid(logger, config);
 RcmManager rcm(logger, config);
 ScreenManager screen(logger, config, charger, energy, tempManager);
 
-// Prototypes des fonctions de tâches
+// Prototypes
 void TaskNetwork(void * pvParameters);
 void TaskCharging(void * pvParameters);
 
@@ -64,57 +63,64 @@ void setup() {
         Serial.printf("[DIAGNOSTIC] Autre cause de reboot détectée : %d\n", reason);
     }
 
-    // 1. Initialisation de la configuration
+    // 1. Configuration
     if (!config.begin()) {
         logger.error("Echec config - Verifier LittleFS");
         return;
     }
 
-    // 2. Initialisation du gestionnaire de diagnostics (avant tout le reste)
-    diagnostics.begin();                                                  // ✅ NOUVEAU
+    // 2. Diagnostics (premier, avant tout le reste)
+    diagnostics.begin();
 
-    // 3. Initialisation des broches matérielles du RCM (GPIO 38 et 39)
+    // ✅ FIX 1 — Watchdog configuré ici, dans setup(), avant la création des tâches.
+    // Les tâches s'enregistreront elles-mêmes via registerCurrentTask().
+    watchdog.begin(10); // Timeout 10 secondes
+
+    // 3. Sécurités matérielles
     rcm.begin();
+    overcurrent.begin();
 
-    // 4. Initialisation de la protection surintensité
-    overcurrent.begin();                                                  // ✅ NOUVEAU
+    // ✅ FIX 3 — tempManager initialisé ici, dans setup(), AVANT la création de TaskCharging.
+    // Garantit que les sondes DS18B20 et le capteur silicium sont prêts dès le premier
+    // appel à isOverheating() dans la boucle de la tâche.
+    tempManager.begin();
 
-    // EXÉCUTION ET VÉRIFICATION DE L'AUTO-TEST MATÉRIEL
+    // 4. Auto-test RCM
     if (!rcm.triggerSelfTest()) {
         if (config.data.debugMode) {
             logger.warn("[DEV MODE] L'auto-test du RCM a échoué, mais le blocage est ignoré.");
         } else {
             logger.critical("CRITICAL : L'auto-test du RCM a échoué ! Système bloqué pour sécurité.");
-            diagnostics.logFault("RCM", "Auto-test RCM échoué au démarrage", "BOOT");  // ✅ NOUVEAU
+            diagnostics.logFault("RCM", "Auto-test RCM echoue au demarrage", "BOOT");
             while(true) {
                 vTaskDelay(1000 / portTICK_PERIOD_MS);
             }
         }
     }
 
-    // 5. Initialisation des autres périphériques
+    // 5. Périphériques applicatifs
     //ledStrip.begin();
     //rfid.begin();
     charger.begin();
     energy.begin();
     //screen.begin();
 
-    // 6. Création de la Tâche CHARGE sur le Cœur 1
+    // 6. Tâche CHARGE — Cœur 1, priorité haute
     xTaskCreatePinnedToCore(
         TaskCharging,
         "TaskCharging",
-        10000,
+        16000,
         NULL,
         2,
         &TaskChargingHandle,
         1
     );
 
-    // 7. Création de la Tâche NETWORK sur le Cœur 0
+    // 7. Tâche NETWORK — Cœur 0, priorité normale
     xTaskCreatePinnedToCore(
         TaskNetwork,
         "TaskNetwork",
-        10000,
+        16000,
         NULL,
         1,
         &TaskNetworkHandle,
@@ -133,7 +139,7 @@ void TaskNetwork(void * pvParameters) {
     wifi.begin();
     server.begin(espClient);
     ota.begin();
-    ntp.begin();          // ✅ NOUVEAU : démarrage après wifi.begin()
+    ntp.begin();       // Après wifi.begin() — configTzTime() nécessite le stack IP
     webPortal.begin();
     watchdog.registerCurrentTask();
 
@@ -141,7 +147,7 @@ void TaskNetwork(void * pvParameters) {
     bool apStarted = false;
 
     for(;;) {
-        // Gestion du bouton WiFi AP (5 secondes sur GPIO 47)
+        // Bouton de forçage AP (maintien 5s sur GPIO btn_config)
         if (digitalRead(config.data.pins.btn_config) == LOW) {
             if (pressStart == 0) pressStart = millis();
             if (!apStarted && millis() - pressStart > 5000) {
@@ -155,7 +161,7 @@ void TaskNetwork(void * pvParameters) {
 
         watchdog.reset();
         wifi.maintain();
-        ntp.maintain();   // ✅ NOUVEAU : synchronisation NTP périodique
+        ntp.maintain();    // Synchronisation NTP périodique (5s → 60s une fois synced)
         ota.handle();
         server.maintain();
         //screen.update();
@@ -174,7 +180,8 @@ void TaskNetwork(void * pvParameters) {
 void TaskCharging(void * pvParameters) {
     logger.info("Task Charging démarrée sur Coeur 1");
 
-    tempManager.begin();
+    // tempManager.begin() est maintenant appelé dans setup() — on enregistre
+    // seulement la tâche auprès du watchdog.
     watchdog.registerCurrentTask();
 
     for(;;) {
@@ -184,7 +191,11 @@ void TaskCharging(void * pvParameters) {
         tempManager.update();
         if (tempManager.isOverheating()) {
             logger.critical("ARRÊT SÉCURITÉ : Surchauffe détectée !");
-            diagnostics.logFault("OVERHEATING", "Surchauffe critique détectée", ntp.getFormattedTime()); // ✅ NOUVEAU
+            // ✅ FIX 2 — ntp.getFormattedTime() est thread-safe : elle n'accède qu'à
+            // l'horloge POSIX système via getLocalTime() (lecture seule, protégée par
+            // l'OS). Les membres mutables de NtpManager (_isSynced, _checkInterval…)
+            // ne sont écrits que dans maintain(), qui s'exécute uniquement sur le Cœur 0.
+            diagnostics.logFault("OVERHEATING", "Surchauffe critique detectee", ntp.getFormattedTime());
             charger.forceEmergencyStop();
         }
 
@@ -192,7 +203,7 @@ void TaskCharging(void * pvParameters) {
         if (rcm.isFaultTriggered()) {
             if (!config.data.debugMode) {
                 logger.critical("ARRÊT MATÉRIEL : Fuite de courant détectée par le RCM !");
-                diagnostics.logFault("RCM", "Fuite de courant détectée", ntp.getFormattedTime()); // ✅ NOUVEAU
+                diagnostics.logFault("RCM", "Fuite de courant detectee", ntp.getFormattedTime());
                 charger.forceEmergencyStop();
             } else {
                 static unsigned long lastRcmLog = 0;
@@ -203,7 +214,7 @@ void TaskCharging(void * pvParameters) {
             }
         }
 
-        // 🛡️ 3. SÉCURITÉ DE SURINTENSITÉ TRIPHASÉE (via OvercurrentManager)  // ✅ NOUVEAU
+        // 🛡️ 3. SÉCURITÉ SURINTENSITÉ TRIPHASÉE
         if (overcurrent.check(energy.getCurrentA(), energy.getCurrentB(), energy.getCurrentC())) {
             logger.critical("ARRÊT SÉCURITÉ : Surintensité détectée par OvercurrentManager !");
             diagnostics.logFault("OVERCURRENT",
@@ -217,19 +228,18 @@ void TaskCharging(void * pvParameters) {
         energy.update();
         ChargingState currentState = charger.getState();
 
-        // 1. Détection Début Session
+        // Détection début de session
         if (currentState == ChargingState::STATE_C && !energy.session.isActive()) {
             energy.session.start(config.data.deviceId);
             logger.success("[OK] Session démarrée");
         }
-        // 2. Détection Fin Session
+        // Détection fin de session
         else if (currentState != ChargingState::STATE_C && energy.session.isActive()) {
             energy.session.stop();
             logger.success("[OK] Session terminée");
             server.saveSessionLocally(energy.session);
         }
 
-        // Mise à jour de la machine à états de charge (PWM, CP, Relais)
         charger.update();
 
         //ledStrip.update();

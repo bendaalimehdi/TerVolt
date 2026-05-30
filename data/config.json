@@ -8,7 +8,9 @@
     "customer_name": "Hotel-Riviera-Paris",
     "location": "Paris, France",
     "debug_mode": true
+    
   },
+
   "network": {
     "wifi_ssid": "BboxM",
     "wifi_pass": "Midi2210@bbox",
@@ -51,7 +53,9 @@
     "nominal_voltage": 400,
     "phase_count": 3,
     "ct_ratio": 2000,
-    "overcurrent_threshold": 35.0
+    "overcurrent_threshold": 35.0,
+    "cpDividerRatio": 4.0,
+    "ventilationAvailable": true
   },
   "safety": {
     "ground_check": true,

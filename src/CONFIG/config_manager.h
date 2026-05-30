@@ -48,6 +48,8 @@ struct ConfigData {
     int temp_max_celsius;
     ProbeConfig probes;
     PinConfig pins;
+    float cpDividerRatio;        // Ratio réel du pont diviseur CP (ex: 4.0)
+    bool  ventilationAvailable;  // La borne est-elle installée dans un local ventilé ?
 };
 
 

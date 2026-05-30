@@ -78,6 +78,8 @@ bool ConfigManager::begin() {
     // --- PARSING SECTION : SAFETY & ELECTRICAL ---
     data.temp_max_celsius    = doc["safety"]["temp_max_celsius"] | 75;
     data.maxAmps             = doc["electrical"]["max_current_amps"] | 32; // Fix: déplacé de safety vers electrical
+    data.cpDividerRatio      = doc["electrical"]["cpDividerRatio"] | 4.0;
+    data.ventilationAvailable = doc["electrical"]["ventilationAvailable"] | true;
 
     // --- PARSING SECTION : PROBES (AUTO-APPRENTISSAGE) ---
     data.probes.pcb_esp    = doc["probes"]["pcb_esp"].as<String>();
@@ -145,6 +147,8 @@ bool ConfigManager::save() {
     doc["electrical"]["phase_count"]          = 3;
     doc["electrical"]["ct_ratio"]             = 2000;
     doc["electrical"]["overcurrent_threshold"] = (float)data.maxAmps + 3.0f;
+    doc["electrical"]["cpDividerRatio"]      = data.cpDividerRatio;
+    doc["electrical"]["ventilationAvailable"] = data.ventilationAvailable;
 
     // --- SÉRIALISATION : SAFETY ---
     doc["safety"]["temp_max_celsius"]        = data.temp_max_celsius;

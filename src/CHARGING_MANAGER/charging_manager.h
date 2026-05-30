@@ -5,17 +5,15 @@
 #include "../LOG/log.h"
 #include "../CONFIG/config_manager.h"
 
-
 enum class ChargingState {
     STATE_A,  // Libre         — Vcp > 10.5 V
     STATE_B,  // Connecté      — 8.0 < Vcp < 10.5 V
     STATE_C,  // Charge active — 5.0 < Vcp < 8.0 V
     STATE_D,  // Ventilation   — 2.0 < Vcp < 5.0 V
     STATE_E,  // Erreur
-    STATE_F   // Fault EVSE
+    STATE_F   // Fault EVSE (Panne matérielle interne)
 };
  
-// FIX #3 : sous-états de la séquence de précharge (remplace les delay() bloquants)
 enum class PrechargeStep {
     IDLE,
     WAITING_PRECHARGE,   // Attend PRECHARGE_DELAY_MS (condensateurs voiture)
@@ -34,11 +32,12 @@ public:
     bool  isVehicleConnected();
     bool  isVehicleRequestingCharge();
     bool  isAuthorized()   const;
+    void  setAuthorized(bool auth);
     bool  isFault()        const;
     bool  isCharging();
-    bool checkRelayGlueFault(bool forceLiveRead = false);
+    bool  checkRelayGlueFault(bool forceLiveRead = false);
     void  forceEmergencyStop();
-    void resetFault();
+    void  resetFault();
     String getStateString() const;
     ChargingState getState() const { return _state; }
     float getLatestPilotVoltage();
@@ -57,11 +56,9 @@ private:
     float         _targetAmps     = 0.0f;
     ChargingState _state          = ChargingState::STATE_A;
  
-    // FIX #2 : anciennement static dans update() — déplacé en membres de classe
     ChargingState  _lastRawState;
     unsigned long  _lastChangeTime;
  
-    // FIX #3 : FSM précharge non-bloquante
     PrechargeStep  _prechargeSubState;
     unsigned long  _prechargeStartTime;
     unsigned long  _relayCloseTime;
@@ -69,14 +66,16 @@ private:
     // Constantes de timing (en ms)
     static constexpr unsigned long CONFIRM_DELAY_MS   = 150;  // Debounce CP
     static constexpr unsigned long PRECHARGE_DELAY_MS = 500;  // Condensateurs voiture
-    static constexpr unsigned long RELAY_SETTLE_MS    = 100;  // Enclenchement mécanique
- 
-    void setPWM(float dutyCyclePercent);
+
+    void  setPWM(float dutyCyclePercent);
     float readPilotVoltage();
-    void tickPrecharge(bool requiresVentilation);
-    void _enterFault();
-    bool _cachedRelayCommandedOn = false;
-    bool _cachedRelayPhysicallyClosed = false;
+    void  tickPrecharge(bool requiresVentilation);
+    void  _enterFault(ChargingState faultState); // Signature unifiée avec paramètre
+    
+    bool  _cachedRelayCommandedOn = false;
+    bool  _cachedRelayPhysicallyClosed = false;
+    float _latestVcp = 12.0f; 
+    bool  _authorized = false;
 };
+
 #endif
- 

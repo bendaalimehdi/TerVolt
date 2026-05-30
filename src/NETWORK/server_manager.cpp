@@ -86,8 +86,17 @@ void ServerManager::reconnect() {
 
 void ServerManager::maintain() {
     if (WiFi.status() != WL_CONNECTED) return;
-    if (!_client.connected()) reconnect();
-    _client.loop();
+    
+    // Tentative de reconnexion espacée de 5 secondes au lieu de saturer le CPU
+    if (!_client.connected()) {
+        static unsigned long lastMqttRetry = 0;
+        if (millis() - lastMqttRetry > 5000) {
+            lastMqttRetry = millis();
+            reconnect();
+        }
+    } else {
+        _client.loop();
+    }
 }
 
 void ServerManager::publishFullStatus() {
