@@ -52,6 +52,8 @@ bool ConfigManager::begin() {
     data.ap_password   = doc["network"]["ap_password"] | "123456789";
     data.mqttServer    = doc["network"]["mqtt_server"] | "192.168.1.30";
     data.ota_password  = doc["network"]["ota_password"] | "admin";
+    data.ntpServer     = doc["network"]["ntp_server"] | "pool.ntp.org";
+    data.overcurrentThreshold = doc["network"]["overcurrent_threshold"] | 1.1;
 
     // --- PARSING SECTION : HARDWARE (PINS) ---
     data.pins.cp_pwm         = doc["hardware"]["pin_cp_pwm"] | -1;
@@ -129,8 +131,8 @@ bool ConfigManager::save() {
     doc["hardware"]["pin_spi_mosi"]       = data.pins.spi_mosi;
     doc["hardware"]["pin_rfid_ss"]        = data.pins.rfid_ss;
     doc["hardware"]["pin_rfid_rst"]       = data.pins.rfid_rst;
-    doc["hardware"]["pin_energy_cs"]      = data.pins.energy_cs; // Fix: Réaligné
-    doc["hardware"]["pin_led_rgb"]        = data.pins.led_rgb;   // Fix: Réaligné
+    doc["hardware"]["pin_energy_cs"]      = data.pins.energy_cs; 
+    doc["hardware"]["pin_led_rgb"]        = data.pins.led_rgb;   
     doc["hardware"]["pin_btn_config"]     = data.pins.btn_config;
     doc["hardware"]["pin_rcm_fault"]      = data.pins.pin_rcm_fault;
     doc["hardware"]["pin_rcm_test"]       = data.pins.pin_rcm_test;

@@ -3,9 +3,15 @@
 WebPortal::WebPortal(Logger& logger, ConfigManager& config, ChargingManager& charger, WifiManager& wifi, EnergyManager& energy, TemperatureManager& tempManager)
     : _server(80), _logger(logger), _config(config), _charger(charger), _wifi(wifi), _energy(energy), _tempManager(tempManager) {}
 
+extern DiagnosticsManager diagnostics;
+
 void WebPortal::begin() {
     _server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
         request->send(200, "text/html", generateDashboard());
+    });
+
+    _server.on("/api/diagnostics", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "application/json", diagnostics.getDiagnosticsJson());
     });
 
 // --- ROUTE : API Status (Données en temps réel) ---

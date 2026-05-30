@@ -1,5 +1,7 @@
 #include "rfid.h"
 
+
+
 RfidManager::RfidManager(Logger& logger, ConfigManager& config) 
     : _logger(logger), _config(config), 
       _mfrc522(config.data.pins.rfid_ss, config.data.pins.rfid_rst) {}
@@ -31,7 +33,12 @@ String RfidManager::update() {
 }
 
 bool RfidManager::isCardPresent() {
-    return _mfrc522.PICC_IsNewCardPresent() && _mfrc522.PICC_ReadCardSerial();
+    bool result = false;
+    if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+        result = _mfrc522.PICC_IsNewCardPresent() && _mfrc522.PICC_ReadCardSerial();
+        xSemaphoreGive(spiMutex);
+    }
+    return result;
 }
 
 String RfidManager::readUID() {

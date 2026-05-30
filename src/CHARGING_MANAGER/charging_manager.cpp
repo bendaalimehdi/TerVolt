@@ -50,9 +50,20 @@ void ChargingManager::begin() {
 // Sécurité contacteur
 // ─────────────────────────────────────────────────────────────────────────────
 
-bool ChargingManager::checkRelayGlueFault() {
-    bool relayCommandedOn    = (digitalRead(_relayPin) == HIGH);
-    bool relayPhysicallyClosed = (digitalRead(_feedbackRelayPin) == LOW); // LOW = contact auxiliaire fermé
+// ─── NOUVELLE VERSION OPTIMISÉE AVEC GESTION DU CACHE ───
+bool ChargingManager::checkRelayGlueFault(bool forceLiveRead) {
+    bool relayCommandedOn;
+    bool relayPhysicallyClosed;
+
+    if (forceLiveRead) {
+        // Lecture matérielle directe (utilisée après un changement d'état provoqué)
+        relayCommandedOn      = (digitalRead(_relayPin) == HIGH);
+        relayPhysicallyClosed = (digitalRead(_feedbackRelayPin) == LOW);
+    } else {
+        // Utilisation passive du cache (évite de surcharger le processeur)
+        relayCommandedOn      = _cachedRelayCommandedOn;
+        relayPhysicallyClosed = _cachedRelayPhysicallyClosed;
+    }
 
     // Cas 1 : Collage — relais commandé OFF mais physiquement fermé
     if (!relayCommandedOn && relayPhysicallyClosed) {
@@ -245,6 +256,9 @@ float ChargingManager::calculatePpResistance(int adcRaw) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void ChargingManager::update() {
+
+    _cachedRelayCommandedOn      = (digitalRead(_relayPin) == HIGH);
+    _cachedRelayPhysicallyClosed = (digitalRead(_feedbackRelayPin) == LOW);
 
     // ── 1. Sécurité prioritaire : contacteur collé ────────────────────────────
     if (checkRelayGlueFault()) {

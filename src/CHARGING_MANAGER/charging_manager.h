@@ -36,7 +36,7 @@ public:
     bool  isAuthorized()   const;
     bool  isFault()        const;
     bool  isCharging();
-    bool  checkRelayGlueFault();
+    bool checkRelayGlueFault(bool forceLiveRead = false);
     void  forceEmergencyStop();
     void resetFault();
     String getStateString() const;
@@ -75,6 +75,8 @@ private:
     float readPilotVoltage();
     void tickPrecharge(bool requiresVentilation);
     void _enterFault();
+    bool _cachedRelayCommandedOn = false;
+    bool _cachedRelayPhysicallyClosed = false;
 };
 #endif
  

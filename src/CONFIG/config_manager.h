@@ -40,7 +40,9 @@ struct ConfigData {
     String ap_password;
     String ota_password;
     String mqttServer;
+    String ntpServer;
     int maxAmps;
+    float overcurrentThreshold;
     bool debugMode;
     int num_leds;
     int temp_max_celsius;

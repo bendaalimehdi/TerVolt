@@ -6,6 +6,7 @@
 #include <SPI.h>
 #include "../LOG/log.h"
 #include "../CONFIG/config_manager.h"
+#include <semphr.h>
 
 class RfidManager {
 public:
@@ -16,6 +17,8 @@ public:
     String readUID();     // Nouvelle méthode
 
 private:
+    SemaphoreHandle_t spiMutex;
+
     Logger& _logger;
     ConfigManager& _config;
     MFRC522 _mfrc522;

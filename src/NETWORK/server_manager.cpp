@@ -44,8 +44,11 @@ void ServerManager::saveSessionLocally(ChargeSession& s) {
 }
 
 // Synchronisation des sessions en attente
+static bool _isSyncing = false;
 void ServerManager::syncPendingSessions() {
-    if (!_client.connected()) return;
+    if (_isSyncing || !_client.connected()) return;
+
+    _isSyncing = true;
 
     File root = LittleFS.open("/sessions");
     File file = root.openNextFile();
@@ -63,6 +66,7 @@ void ServerManager::syncPendingSessions() {
         }
         file = root.openNextFile();
     }
+    _isSyncing = false;
 }
 
 void ServerManager::reconnect() {
@@ -91,49 +95,70 @@ void ServerManager::publishFullStatus() {
 
     JsonDocument doc;
     doc["device_id"] = _config.data.deviceId;
-    doc["timestamp_unix"] = now(); // Si tu as synchronisé une RTC ou le NTP
+    
+    // Remplacement de now() par l'API POSIX standard pour le timestamp NTP
+    doc["timestamp_unix"] = (uint32_t)time(nullptr); 
 
-    // 1. État binaire des Pins & Feedback matériels
+    // ─── 1. ÉTAT BINAIRE DES PINS SÉCURISÉ (Vérification != -1) ───
     JsonObject hwPins = doc["hardware_status"]["pins_state"].to<JsonObject>();
-    hwPins["relay_main"]             = digitalRead(_config.data.pins.relay) ? "ON" : "OFF";
-    hwPins["relay_precharge"]        = digitalRead(_config.data.pins.precharge) ? "ON" : "OFF";
-    hwPins["feedback_relay_glued"]   = digitalRead(_config.data.pins.feedback_relay) == LOW ? "FAULT" : "OK";
-    hwPins["button_config_pressed"]  = digitalRead(_config.data.pins.btn_config) == LOW ? "PRESSED" : "RELEASED";
+    
+    hwPins["relay_main"] = (_config.data.pins.relay != -1) ? 
+        (digitalRead(_config.data.pins.relay) ? "ON" : "OFF") : "UNCONFIGURED";
+        
+    hwPins["relay_precharge"] = (_config.data.pins.precharge != -1) ? 
+        (digitalRead(_config.data.pins.precharge) ? "ON" : "OFF") : "UNCONFIGURED";
+        
+    hwPins["feedback_relay_glued"] = (_config.data.pins.feedback_relay != -1) ? 
+        (digitalRead(_config.data.pins.feedback_relay) == LOW ? "FAULT" : "OK") : "UNCONFIGURED";
+        
+    hwPins["button_config_pressed"] = (_config.data.pins.btn_config != -1) ? 
+        (digitalRead(_config.data.pins.btn_config) == LOW ? "PRESSED" : "RELEASED") : "UNCONFIGURED";
 
-    // 2. Valeurs électriques brutes (ADC)
+    // ─── 2. VALEURS ANALOGIQUES PROTÉGÉES (ADC) ───
     JsonObject hwAnalog = doc["hardware_status"]["analog_measurements"].to<JsonObject>();
     
     // Control Pilot (CP)
-    int cpRaw = analogRead(_config.data.pins.cp_adc);
-    hwAnalog["cp_adc_raw"]           = cpRaw;
-    hwAnalog["cp_voltage_peak"]      = _charger.getLatestPilotVoltage(); // Ta méthode de lecture
+    if (_config.data.pins.cp_adc != -1) {
+        int cpRaw = analogRead(_config.data.pins.cp_adc);
+        hwAnalog["cp_adc_raw"]      = cpRaw;
+        hwAnalog["cp_voltage_peak"] = _charger.getLatestPilotVoltage();
+    } else {
+        hwAnalog["cp_adc_raw"]      = -1;
+        hwAnalog["cp_voltage_peak"] = 0.0f;
+    }
 
     // Proximity Pilot (PP)
-    int ppRaw = analogRead(_config.data.pins.pp_adc);
-    hwAnalog["pp_adc_raw"]           = ppRaw;
-    hwAnalog["pp_resistance_ohm"]    = _charger.calculatePpResistance(ppRaw); // Calcul selon ton pont diviseur
+    if (_config.data.pins.pp_adc != -1) {
+        int ppRaw = analogRead(_config.data.pins.pp_adc);
+        hwAnalog["pp_adc_raw"]        = ppRaw;
+        hwAnalog["pp_resistance_ohm"] = _charger.calculatePpResistance(ppRaw);
+    } else {
+        hwAnalog["pp_adc_raw"]        = -1;
+        hwAnalog["pp_resistance_ohm"] = -1.0f;
+    }
     hwAnalog["calculated_cable_max_amps"] = _config.data.maxAmps;
 
-    // 3. Santé de l'ESP32 (Diagnostic Watchdog / RAM)
+    // ─── 3. SANTÉ DE L'ESP32 ET CORRECTION RESET REASON ───
     JsonObject sysHealth = doc["system_health"].to<JsonObject>();
     sysHealth["free_heap_bytes"]     = ESP.getFreeHeap();
     sysHealth["min_free_heap_bytes"] = ESP.getMinFreeHeap();
     sysHealth["wifi_rssi_dbm"]       = WiFi.RSSI();
-    sysHealth["reset_reason"] = String(rtc_get_reset_reason(0));
+    
+    // Utilisation de l'API moderne d'Espressif pour l'ESP32-S3
+    sysHealth["reset_reason"]        = String((int)esp_reset_reason()); 
 
-    // 4. Extraction du dernier Log système
-    doc["latest_log"] = _logger.getLatestLog(); // Nécessite d'ajouter un getter de chaîne dans ta classe Logger
+    // ─── 4. CAPTURE DU DERNIER LOG ───
+    doc["latest_log"] = _logger.getLatestLog();
 
     String payload;
     serializeJson(doc, payload);
- 
 
     String topic = "tervolt/" + _config.data.deviceId;
 
     if (_client.publish(topic.c_str(), payload.c_str())) {
-        _logger.success("MQTT Télémétrie envoyée !");
+        _logger.success("MQTT Télémétrie envoyée avec succès !");
     } else {
-        _logger.error("MQTT Télémétrie : Échec de l'envoi.");
+        _logger.error("MQTT Télémétrie : Échec de l'envoi de l'enveloppe.");
     }
 }
 bool ServerManager::isConnected() {

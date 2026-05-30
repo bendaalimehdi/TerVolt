@@ -55,21 +55,26 @@ void TemperatureManager::begin() {
     _sensors->begin();
 
     int sensorCount = _sensors->getDeviceCount();
-    _logger.info("TemperatureManager : Bus OneWire scanne. Capteurs physiques trouves : " + String(sensorCount));
+    _logger.info("TemperatureManager : Bus OneWire scanné. Capteurs physiques trouvés : " + String(sensorCount));
 
-    // --- LOGIQUE D'AUTO-APPRENTISSAGE EN FABRICATION (CYCLES ON/OFF) ---
-    if (sensorCount > 0) {
-        String savedEsp = _config.data.probes.pcb_esp;
-        String savedEnergy = _config.data.probes.pcb_energy;
-        String savedContacteur = _config.data.probes.contacteur;
+    // Récupération des adresses stockées en configuration
+    String savedEsp = _config.data.probes.pcb_esp;
+    String savedEnergy = _config.data.probes.pcb_energy;
+    String savedContacteur = _config.data.probes.contacteur;
 
+    // ⚡ COURT-CIRCUIT DE L'APPRENTISSAGE : Si le profil thermique de la borne est déjà complet
+    if (!savedEsp.isEmpty() && !savedEnergy.isEmpty() && !savedContacteur.isEmpty()) {
+        _logger.success("TemperatureManager : Profil thermique validé dans config.json. Mode surveillance actif (Apprentissage ignoré).");
+    } 
+    // --- LOGIQUE D'AUTO-APPRENTISSAGE EN FABRICATION (Uniquement si configuration incomplète) ---
+    else if (sensorCount > 0) {
         // Étape 1 : Seulement la carte ESP sous tension (1 seule sonde détectée)
         if (sensorCount == 1 && savedEsp.isEmpty()) {
             DeviceAddress addr;
             if (_sensors->getAddress(addr, 0)) {
                 _config.data.probes.pcb_esp = addressToString(addr);
                 _config.save();
-                _logger.success("[USINE] Etape 1/3 reussie : Sonde PCB ESP32 enregistree (" + _config.data.probes.pcb_esp + "). Coupez l'alimentation et branchez le PCB Energy.");
+                _logger.success("[USINE] Étape 1/3 réussie : Sonde PCB ESP32 enregistrée (" + _config.data.probes.pcb_esp + "). Coupez l'alimentation et branchez le PCB Energy.");
             }
         }
         // Étape 2 : PCB ESP + PCB Energy branchés (2 sondes détectées)
@@ -81,7 +86,7 @@ void TemperatureManager::begin() {
                     if (currentAddr != savedEsp) { // C'est la nouvelle sonde !
                         _config.data.probes.pcb_energy = currentAddr;
                         _config.save();
-                        _logger.success("[USINE] Etape 2/3 reussie : Sonde PCB ENERGY SENSE enregistree (" + _config.data.probes.pcb_energy + "). Coupez l'alimentation et branchez le Contacteur.");
+                        _logger.success("[USINE] Étape 2/3 réussie : Sonde PCB ENERGY SENSE enregistrée (" + _config.data.probes.pcb_energy + "). Coupez l'alimentation et branchez le Contacteur.");
                         break;
                     }
                 }
@@ -96,14 +101,14 @@ void TemperatureManager::begin() {
                     if (currentAddr != savedEsp && currentAddr != savedEnergy) { // C'est la dernière !
                         _config.data.probes.contacteur = currentAddr;
                         _config.save();
-                        _logger.success("[USINE] Etape 3/3 reussie : Sonde CONTACTEUR enregistree (" + _config.data.probes.contacteur + "). Configuration TerVolt terminee !");
+                        _logger.success("[USINE] Étape 3/3 réussie : Sonde CONTACTEUR enregistrée (" + _config.data.probes.contacteur + "). Configuration TerVolt terminée !");
                         break;
                     }
                 }
             }
         }
     } else if (_config.data.debugMode) {
-        _logger.warn("[DEV MODE] Aucune sonde DS18B20 connectee sur table. Apprentissage usine ignore.");
+        _logger.warn("[DEV MODE] Aucune sonde DS18B20 connectée sur table. Apprentissage usine ignoré.");
     }
 
     // --- INITIALISATION DU CAPTEUR THERMIQUE INTERNE ESP32 ---
@@ -113,14 +118,14 @@ void TemperatureManager::begin() {
     if (err == ESP_OK) {
         err = temperature_sensor_enable(_espTempSensor);
         if (err == ESP_OK) {
-            _logger.success("Capteur thermique interne ESP32 initialise.");
+            _logger.success("Capteur thermique interne ESP32 initialisé.");
         } else {
-            _logger.error("Echec activation capteur thermique ESP32.");
+            _logger.error("Échec activation capteur thermique ESP32.");
             temperature_sensor_uninstall(_espTempSensor);
             _espTempSensor = NULL;
         }
     } else {
-        _logger.error("Echec installation capteur thermique ESP32.");
+        _logger.error("Échec installation capteur thermique ESP32.");
         _espTempSensor = NULL;
     }
 }

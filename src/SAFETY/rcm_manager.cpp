@@ -44,11 +44,11 @@ bool RcmManager::triggerSelfTest() {
     
     // Envoi d'une impulsion sur la pin Test pour simuler une fuite de courant interne au RCM
     digitalWrite(_testPin, LOW);
-    delay(100); // Le module a généralement besoin de 20 à 40ms pour réagir
+    vTaskDelay(100 / portTICK_PERIOD_MS); // Le module a généralement besoin de 20 à 40ms pour réagir
     digitalWrite(_testPin, HIGH);
     
     // On attend un court instant pour laisser l'interruption se déclencher
-    delay(20);
+    vTaskDelay(20 / portTICK_PERIOD_MS);
     
     if (_faultTriggered) {
         _logger.success("RcmManager : Auto-test RÉUSSI. Le capteur a bien détecté la fausse fuite.");

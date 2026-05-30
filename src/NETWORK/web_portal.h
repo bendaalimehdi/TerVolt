@@ -10,6 +10,7 @@
 #include "../ENERGY/energy_manager.h"
 #include "../ENERGY/charge_session.h"
 #include "../SAFETY/temperature_manager.h"
+#include "../SAFETY/diagnostics_manager.h"
 
 
 class WebPortal {
