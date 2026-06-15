@@ -29,6 +29,8 @@ struct PinConfig {
     int btn_config;
     int pin_rcm_fault;
     int pin_rcm_test;
+    int pin_lora_tx;
+    int pin_lora_rx;
 };
 
 struct ConfigData {
@@ -38,6 +40,8 @@ struct ConfigData {
     String ssid;
     String password;
     String ap_password;
+    bool loraEnabled;
+    String loraSecretKey;
     String ota_password;
     String mqttServer;
     String ntpServer;

@@ -50,6 +50,8 @@ bool ConfigManager::begin() {
     data.ssid          = doc["network"]["wifi_ssid"] | "";
     data.password      = doc["network"]["wifi_pass"] | "";
     data.ap_password   = doc["network"]["ap_password"] | "123456789";
+    data.loraEnabled   = doc["network"]["lora_enabled"] | false;
+    data.loraSecretKey = doc["network"]["lora_secret_key"] | "TvSecretKey2026!";    
     data.mqttServer    = doc["network"]["mqtt_server"] | "192.168.1.30";
     data.ota_password  = doc["network"]["ota_password"] | "admin";
     data.ntpServer     = doc["network"]["ntp_server"] | "pool.ntp.org";
@@ -73,6 +75,8 @@ bool ConfigManager::begin() {
     data.pins.btn_config     = doc["hardware"]["pin_btn_config"] | -1;
     data.pins.pin_rcm_fault  = doc["hardware"]["pin_rcm_fault"] | 38;
     data.pins.pin_rcm_test   = doc["hardware"]["pin_rcm_test"] | 39;
+    data.pins.pin_lora_tx    = doc["hardware"]["pin_lora_tx"] | 17;
+    data.pins.pin_lora_rx    = doc["hardware"]["pin_lora_rx"] | 16;
     data.num_leds            = doc["hardware"]["num_leds"] | 6;       // Fix: aligné avec le JSON
 
     // --- PARSING SECTION : SAFETY & ELECTRICAL ---
@@ -119,7 +123,8 @@ bool ConfigManager::save() {
     doc["network"]["mqtt_pass"]    = "MqttAuthPwd";
     doc["network"]["ntp_server"]   = "pool.ntp.org";
     doc["network"]["ota_password"] = data.ota_password;
-
+    doc["network"]["lora_enabled"] = data.loraEnabled;
+    doc["network"]["lora_secret_key"] = data.loraSecretKey;
     // --- SÉRIALISATION : HARDWARE ---
     doc["hardware"]["pin_cp_pwm"]         = data.pins.cp_pwm;
     doc["hardware"]["pin_cp_adc"]         = data.pins.cp_adc;
@@ -138,6 +143,8 @@ bool ConfigManager::save() {
     doc["hardware"]["pin_btn_config"]     = data.pins.btn_config;
     doc["hardware"]["pin_rcm_fault"]      = data.pins.pin_rcm_fault;
     doc["hardware"]["pin_rcm_test"]       = data.pins.pin_rcm_test;
+    doc["hardware"]["pin_lora_tx"]        = data.pins.pin_lora_tx;
+    doc["hardware"]["pin_lora_rx"]        = data.pins.pin_lora_rx;
     doc["hardware"]["num_leds"]           = data.num_leds;
 
     // --- SÉRIALISATION : ELECTRICAL ---

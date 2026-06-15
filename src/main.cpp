@@ -16,9 +16,12 @@
 #include "INTERACTION/screen_manager.h"
 #include "SAFETY/watchdog.h"
 #include "SAFETY/diagnostics_manager.h"
+#include "NETWORK/lora_manager.h"
+
 
 
 WiFiClient espClient;
+
 Logger logger;
 ConfigManager config;
 WatchdogManager watchdog(logger, config);
@@ -35,6 +38,7 @@ DiagnosticsManager diagnostics(logger, config);
 
 ServerManager server(logger, config, energy, charger, ota, tempManager);
 WebPortal webPortal(logger, config, charger, wifi, energy, tempManager);
+LoraManager loraManager(logger, config, charger, energy);
 
 LedManager ledStrip(logger, config);
 RfidManager rfid(logger, config);
@@ -103,6 +107,7 @@ void setup() {
     //rfid.begin();
     charger.begin();
     energy.begin();
+    loraManager.begin();
     //screen.begin();
 
     // 6. Tâche CHARGE — Cœur 1, priorité haute
@@ -130,7 +135,6 @@ void setup() {
 
 // --- COEUR 0 : GESTION RÉSEAU & WIFI ---
 void TaskNetwork(void * pvParameters) {
-
     server.initStorage();
     unsigned long lastMsg = 0;
     logger.info("Task Network démarrée sur Coeur 0");
@@ -139,7 +143,7 @@ void TaskNetwork(void * pvParameters) {
     wifi.begin();
     server.begin(espClient);
     ota.begin();
-    ntp.begin();       // Après wifi.begin() — configTzTime() nécessite le stack IP
+    ntp.begin();       
     webPortal.begin();
     watchdog.registerCurrentTask();
 
@@ -147,7 +151,7 @@ void TaskNetwork(void * pvParameters) {
     bool apStarted = false;
 
     for(;;) {
-        // Bouton de forçage AP (maintien 5s sur GPIO btn_config)
+        // 🟢 LE BOUTON PHYSIQUE EST TOUJOURS ACCESSIBLE POUR FORCER L'AP WIFI
         if (digitalRead(config.data.pins.btn_config) == LOW) {
             if (pressStart == 0) pressStart = millis();
             if (!apStarted && millis() - pressStart > 5000) {
@@ -161,15 +165,22 @@ void TaskNetwork(void * pvParameters) {
 
         watchdog.reset();
         wifi.maintain();
-        ntp.maintain();    // Synchronisation NTP périodique (5s → 60s une fois synced)
-        ota.handle();
-        server.maintain();
-        //screen.update();
+        
+        // --- ROUTAGE MODULAIRE SELON CONFIGURATION ---
+        if (!config.data.loraEnabled) {
+            // Mode nominal : Maintien et publication via l'infrastructure WiFi/MQTT
+            ntp.maintain();    
+            ota.handle();
+            server.maintain();
 
-        if (server.isConnected() && (millis() - lastMsg > 10000)) {
-            lastMsg = millis();
-            server.publishFullStatus();
-            logger.info("MQTT : Statut périodique envoyé au serveur.");
+            if (server.isConnected() && (millis() - lastMsg > 10000)) {
+                lastMsg = millis();
+                server.publishFullStatus();
+                logger.info("MQTT : Statut périodique envoyé au serveur.");
+            }
+        } else {
+            // Mode alternatif isolé : Maintien de l'automate LoRa DX-L03
+            loraManager.maintain(); 
         }
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
