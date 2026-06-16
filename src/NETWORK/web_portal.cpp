@@ -6,6 +6,28 @@ WebPortal::WebPortal(Logger& logger, ConfigManager& config, ChargingManager& cha
 extern DiagnosticsManager diagnostics;
 
 void WebPortal::begin() {
+    auto redirectToPortal = [](AsyncWebServerRequest *request) {
+        String url = "http://" + WiFi.softAPIP().toString() + "/";
+        request->redirect(url);
+    };
+
+    // 📡 FIX CRITIQUE : Démarrage du serveur DNS Captif
+    // Il écoute sur le port 53 et redirige TOUTES les requêtes (*) vers l'IP du Point d'Accès
+    _dnsServer.start(53, "*", WiFi.softAPIP());
+    _dnsStarted = true;
+
+    // ─── Captures de Connectivité OS (Android, Apple, Windows) ────
+    _server.on("/generate_204", HTTP_GET, redirectToPortal);
+    _server.on("/gen_204", HTTP_GET, redirectToPortal);
+    _server.on("/connectivity-check/generate_204", HTTP_GET, redirectToPortal);
+    _server.on("/hotspot-detect.html", HTTP_GET, redirectToPortal);
+    _server.on("/library/test/success.html", HTTP_GET, redirectToPortal);
+    _server.on("/success.txt", HTTP_GET, redirectToPortal);
+    _server.on("/ncsi.txt", HTTP_GET, redirectToPortal);
+    _server.on("/connecttest.txt", HTTP_GET, redirectToPortal);
+    _server.on("/redirect", HTTP_GET, redirectToPortal);
+
+    // --- ROUTE : Page d'accueil du Dashboard ---
     _server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
         request->send(200, "text/html", generateDashboard());
     });
@@ -14,14 +36,11 @@ void WebPortal::begin() {
         request->send(200, "application/json", diagnostics.getDiagnosticsJson());
     });
 
-// --- ROUTE : API Status (Données en temps réel) ---
+    // --- ROUTE : API Status (Données en temps réel) ---
     _server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
         JsonDocument doc;
         
-        // État de la borne
         doc["status"] = _charger.getStateString();
-        
-        // Mesures électriques réelles (ATM90E32)
         doc["voltage_a"] = _energy.getVoltageA();
         doc["current_a"] = _energy.getCurrentA();
         doc["voltage_b"] = _energy.getVoltageB();
@@ -30,14 +49,12 @@ void WebPortal::begin() {
         doc["current_c"] = _energy.getCurrentC();
         doc["power"] = _energy.activePowerTotal();
 
-        // SÉCURISATION : Extraction passive des températures (Pas de collision inter-cœurs)
-        doc["temp_l1"] = _tempManager.getPcbEspTemp();         // Température ambiante carte mère
-        doc["temp_l2"] = _tempManager.getPcbEnergyTemp();      // Température PCB ATM90
+        doc["temp_l1"] = _tempManager.getPcbEspTemp();         
+        doc["temp_l2"] = _tempManager.getPcbEnergyTemp();      
         doc["temp_l3"] = _tempManager.getContacteurTemp();
-        doc["temp_esp"] = _tempManager.getInternalSiliconTemp(); // S'assurer que cette méthode renvoie _tempESP dans le .cpp
+        doc["temp_esp"] = _tempManager.getInternalSiliconTemp(); 
         doc["overheating"] = _tempManager.isOverheating();
         
-        // Infos système
         doc["device_id"] = _config.data.deviceId;
         doc["uptime"] = millis() / 1000;
         doc["ip"] = _wifi.getIP();
@@ -52,10 +69,22 @@ void WebPortal::begin() {
         request->send(200, "application/json", response);
     });
 
+    // 🚨 Redirection universelle Captive pour toutes les autres requêtes d'URLs inconnues
+    _server.onNotFound([this](AsyncWebServerRequest *request) {
+        String urlRedirect = "http://" + WiFi.softAPIP().toString() + "/";
+        request->redirect(urlRedirect);
+    });
+
     _server.begin();
-    _logger.success("Portail Web de production lancé sur le port 80");
+    _logger.success("Portail Web de production lancé sur le port 80 avec redirection captive");
 }
 
+// 🔄 Appelé en boucle dans la TaskNetwork de main.cpp
+void WebPortal::handleDNS() {
+    if (_dnsStarted) {
+        _dnsServer.processNextRequest();
+    }
+}
 String WebPortal::generateDashboard() {
     String html = R"rawliteral(
 <!DOCTYPE html>

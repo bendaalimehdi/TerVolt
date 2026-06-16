@@ -164,8 +164,11 @@ void TaskNetwork(void * pvParameters) {
         }
 
         watchdog.reset();
-        wifi.maintain();
         
+        // 📶 MAINTENANCE DU RÉSEAU & PORTAIL CAPTIF
+        wifi.maintain();
+        webPortal.handleDNS(); // 🎯 AJOUT : Traitement ultra-rapide des requêtes de redirection DNS
+
         // --- ROUTAGE MODULAIRE SELON CONFIGURATION ---
         if (!config.data.loraEnabled) {
             // Mode nominal : Maintien et publication via l'infrastructure WiFi/MQTT
@@ -183,7 +186,7 @@ void TaskNetwork(void * pvParameters) {
             loraManager.maintain(); 
         }
 
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Laisser respirer les autres tâches du Cœur 0
     }
 }
 
