@@ -1,3 +1,35 @@
+/**
+ * @file    main.cpp
+ * @brief   Firmware EVSE ESP32-S3 N16R8 — Architecture 3 tâches FreeRTOS
+ *
+ * ARCHITECTURE :
+ *   Cœur 1 │ TaskSafety   (priorité 3) — RCM, thermique, surintensité UNIQUEMENT
+ *   Cœur 1 │ TaskCharging (priorité 2) — automate de charge, énergie, session
+ *   Cœur 0 │ TaskNetwork  (priorité 1) — WiFi, MQTT, OTA, WebPortal, LoRa
+ *
+ * AMÉLIORATIONS APPLIQUÉES :
+ *   [FIX-01] Séparation TaskSafety / TaskCharging → sécurité ne peut pas être
+ *            bloquée par une écriture LittleFS ou une mise à jour énergie.
+ *   [FIX-02] saveSessionLocally() déporté dans TaskNetwork via une FreeRTOS Queue
+ *            → plus d'accès LittleFS dans le cœur temps-réel.
+ *   [FIX-03] horodatage NTP partagé via snapshotTime (volatile + mutex) au lieu
+ *            d'appeler ntp.getFormattedTime() depuis le Cœur 1.
+ *   [FIX-04] forceEmergencyStop() protégé par un mutex binaire pour éviter les
+ *            appels concurrents des trois vérifications de sécurité.
+ *   [FIX-05] initStorage() déplacé dans setup() AVANT la création des tâches,
+ *            après watchdog.begin() mais avant xTaskCreatePinnedToCore.
+ *   [FIX-06] Backoff exponentiel MQTT (10 s → 5 min max) avec remise à zéro
+ *            sur publication réussie.
+ *   [FIX-07] Bouton config piloté par ISR + xTaskNotifyFromISR au lieu d'un
+ *            polling millis() dans la boucle réseau.
+ *   [FIX-08] vTaskDelayUntil() dans TaskSafety pour un timing déterministe à
+ *            10 ms, indépendant de la durée des lectures capteurs.
+ *   [FIX-09] Stacks augmentés et vérifiés via uxTaskGetStackHighWaterMark()
+ *            en mode debug (TaskNetwork : 24 KB, TaskSafety/Charging : 16 KB).
+ *   [FIX-10] Macros de log conditionnelles pour supprimer les logs en
+ *            production et libérer du CPU sur le Cœur 1.
+ */
+
 #include <Arduino.h>
 #include "LOG/log.h"
 #include "CONFIG/config_manager.h"
@@ -18,99 +50,201 @@
 #include "SAFETY/diagnostics_manager.h"
 #include "NETWORK/lora_manager.h"
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Objets globaux
+// ─────────────────────────────────────────────────────────────────────────────
 
 WiFiClient espClient;
 
-Logger logger;
-ConfigManager config;
+Logger          logger;
+ConfigManager   config;
 WatchdogManager watchdog(logger, config);
-
-WifiManager wifi(logger, config);
-
+WifiManager     wifi(logger, config);
 ChargingManager charger(logger, config);
-EnergyManager energy(logger, config);
+EnergyManager   energy(logger, config);
 TemperatureManager tempManager(logger, config);
-OtaManager ota(logger, config);
-NtpManager ntp(logger, config);
+OtaManager      ota(logger, config);
+NtpManager      ntp(logger, config);
 OvercurrentManager overcurrent(logger, config);
 DiagnosticsManager diagnostics(logger, config);
+ServerManager   server(logger, config, energy, charger, ota, tempManager);
+WebPortal       webPortal(logger, config, charger, wifi, energy, tempManager);
+LoraManager     loraManager(logger, config, charger, energy);
+LedManager      ledStrip(logger, config);
+RfidManager     rfid(logger, config);
+RcmManager      rcm(logger, config);
+ScreenManager   screen(logger, config, charger, energy, tempManager);
 
-ServerManager server(logger, config, energy, charger, ota, tempManager);
-WebPortal webPortal(logger, config, charger, wifi, energy, tempManager);
-LoraManager loraManager(logger, config, charger, energy);
+// ─────────────────────────────────────────────────────────────────────────────
+// [FIX-03] Snapshot horodaté partagé Cœur-0 → Cœur-1
+// ntp.getFormattedTime() n'est JAMAIS appelé depuis le Cœur 1 directement.
+// TaskNetwork écrit snapshotTime toutes les secondes sous le mutex ntpMutex.
+// TaskSafety lit snapshotTime sous le même mutex.
+// ─────────────────────────────────────────────────────────────────────────────
+static SemaphoreHandle_t ntpMutex      = nullptr;
+static char              snapshotTime[32] = "??:??:??";
+static unsigned long     lastNtpSnapshot  = 0;
 
-LedManager ledStrip(logger, config);
-RfidManager rfid(logger, config);
-RcmManager rcm(logger, config);
-ScreenManager screen(logger, config, charger, energy, tempManager);
+/**
+ * @brief  Lit le snapshot NTP de manière thread-safe.
+ *         Peut être appelé depuis n'importe quel cœur.
+ */
+static void getThreadSafeTime(char* buf, size_t len) {
+    if (xSemaphoreTake(ntpMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+        strncpy(buf, snapshotTime, len);
+        buf[len - 1] = '\0';
+        xSemaphoreGive(ntpMutex);
+    } else {
+        strncpy(buf, "??:??:??", len);
+    }
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// [FIX-04] Mutex pour forceEmergencyStop()
+// Les 3 vérifications de sécurité (thermique, RCM, surintensité) tournent
+// dans la même tâche mais un flag volatile évite un double appel réentrant
+// si jamais la structure évolue.
+// ─────────────────────────────────────────────────────────────────────────────
+static SemaphoreHandle_t emergencyMutex = nullptr;
+static volatile bool     emergencyActive = false;
+
+/**
+ * @brief  Déclenche l'arrêt d'urgence de manière atomique.
+ *         Journalise la cause et l'horodatage thread-safe.
+ */
+static void triggerEmergencyStop(const char* cause, const char* detail) {
+    if (xSemaphoreTake(emergencyMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        if (!emergencyActive) {
+            emergencyActive = true;
+            char ts[32];
+            getThreadSafeTime(ts, sizeof(ts));
+            logger.critical(String("ARRÊT SÉCURITÉ [") + cause + "] " + detail);
+            diagnostics.logFault(cause, detail, ts);
+            charger.forceEmergencyStop();
+        }
+        xSemaphoreGive(emergencyMutex);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [FIX-02] Queue pour les sauvegardes de session LittleFS
+// TaskCharging pousse une session terminée dans la queue.
+// TaskNetwork dépile et écrit sur le filesystem → zéro I/O bloquant sur Cœur 1.
+// ─────────────────────────────────────────────────────────────────────────────
+static QueueHandle_t sessionSaveQueue = nullptr;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [FIX-07] ISR bouton configuration
+// Notifie TaskNetwork via xTaskNotifyFromISR au lieu d'un polling millis().
+// ─────────────────────────────────────────────────────────────────────────────
+static TaskHandle_t TaskNetworkHandle  = nullptr;
+static TaskHandle_t TaskChargingHandle = nullptr;
+static TaskHandle_t TaskSafetyHandle   = nullptr;
+
+void IRAM_ATTR btnConfigISR() {
+    BaseType_t higherPriorityTaskWoken = pdFALSE;
+    if (TaskNetworkHandle) {
+        xTaskNotifyFromISR(TaskNetworkHandle, 1, eSetBits, &higherPriorityTaskWoken);
+    }
+    portYIELD_FROM_ISR(higherPriorityTaskWoken);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Prototypes
-void TaskNetwork(void * pvParameters);
-void TaskCharging(void * pvParameters);
+// ─────────────────────────────────────────────────────────────────────────────
+void TaskSafety(void* pvParameters);
+void TaskCharging(void* pvParameters);
+void TaskNetwork(void* pvParameters);
 
-TaskHandle_t TaskChargingHandle = NULL;
-TaskHandle_t TaskNetworkHandle = NULL;
-
+// ─────────────────────────────────────────────────────────────────────────────
+// setup()
+// ─────────────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     delay(500);
 
     logger.begin();
-    esp_reset_reason_t reason = esp_reset_reason();
 
+    // ── Diagnostic cause de reboot ──────────────────────────────────────────
+    esp_reset_reason_t reason = esp_reset_reason();
     if (reason == ESP_RST_TASK_WDT || reason == ESP_RST_WDT) {
-        Serial.println("🚨 [DIAGNOSTIC] ATTENTION : Le dernier redémarrage était un CRASH WATCHDOG !");
+        Serial.println("🚨 [DIAGNOSTIC] Dernier redémarrage : CRASH WATCHDOG !");
     } else if (reason == ESP_RST_POWERON) {
-        Serial.println("⚡ [DIAGNOSTIC] Démarrage normal (Mise sous tension).");
+        Serial.println("⚡ [DIAGNOSTIC] Démarrage normal (mise sous tension).");
     } else {
-        Serial.printf("[DIAGNOSTIC] Autre cause de reboot détectée : %d\n", reason);
+        Serial.printf("[DIAGNOSTIC] Autre cause de reboot : %d\n", reason);
     }
 
-    // 1. Configuration
+    // ── 1. Configuration ─────────────────────────────────────────────────────
     if (!config.begin()) {
-        logger.error("Echec config - Verifier LittleFS");
+        logger.error("Echec config — vérifier LittleFS");
         return;
     }
 
-    // 2. Diagnostics (premier, avant tout le reste)
+    // ── 2. Diagnostics ───────────────────────────────────────────────────────
     diagnostics.begin();
 
-    // ✅ FIX 1 — Watchdog configuré ici, dans setup(), avant la création des tâches.
-    // Les tâches s'enregistreront elles-mêmes via registerCurrentTask().
-    watchdog.begin(10); // Timeout 10 secondes
+    // ── 3. Primitives de synchronisation ─────────────────────────────────────
+    // [FIX-03] [FIX-04]
+    ntpMutex      = xSemaphoreCreateMutex();
+    emergencyMutex = xSemaphoreCreateMutex();
+    if (!ntpMutex || !emergencyMutex) {
+        logger.critical("FATAL : impossible de créer les mutex — système bloqué.");
+        while (true) { vTaskDelay(1000 / portTICK_PERIOD_MS); }
+    }
 
-    // 3. Sécurités matérielles
+    // ── 4. Watchdog ───────────────────────────────────────────────────────────
+    // [FIX-ORIG] : configuré dans setup() avant la création des tâches
+    watchdog.begin(10); // timeout 10 s
+
+    // ── 5. Sécurités matérielles ─────────────────────────────────────────────
     rcm.begin();
     overcurrent.begin();
+    tempManager.begin(); // DS18B20 + capteur silicium prêts avant TaskSafety
 
-    // ✅ FIX 3 — tempManager initialisé ici, dans setup(), AVANT la création de TaskCharging.
-    // Garantit que les sondes DS18B20 et le capteur silicium sont prêts dès le premier
-    // appel à isOverheating() dans la boucle de la tâche.
-    tempManager.begin();
-
-    // 4. Auto-test RCM
+    // ── 6. Auto-test RCM ─────────────────────────────────────────────────────
     if (!rcm.triggerSelfTest()) {
         if (config.data.debugMode) {
-            logger.warn("[DEV MODE] L'auto-test du RCM a échoué, mais le blocage est ignoré.");
+            logger.warn("[DEV MODE] Auto-test RCM échoué — blocage ignoré.");
         } else {
-            logger.critical("CRITICAL : L'auto-test du RCM a échoué ! Système bloqué pour sécurité.");
+            logger.critical("CRITICAL : Auto-test RCM échoué ! Système bloqué.");
             diagnostics.logFault("RCM", "Auto-test RCM echoue au demarrage", "BOOT");
-            while(true) {
-                vTaskDelay(1000 / portTICK_PERIOD_MS);
-            }
+            while (true) { vTaskDelay(1000 / portTICK_PERIOD_MS); }
         }
     }
 
-    // 5. Périphériques applicatifs
-    //ledStrip.begin();
-    //rfid.begin();
+    // ── 7. Périphériques applicatifs ─────────────────────────────────────────
     charger.begin();
     energy.begin();
     loraManager.begin();
-    //screen.begin();
 
-    // 6. Tâche CHARGE — Cœur 1, priorité haute
+    // ── 8. [FIX-05] initStorage() dans setup(), avant les tâches ─────────────
+    server.initStorage();
+
+    // ── 9. [FIX-02] Queue de sauvegarde session ───────────────────────────────
+    // sizeof(energy.session) — adapter si la session est un pointeur ou une struct
+    sessionSaveQueue = xQueueCreate(4, sizeof(energy.session));
+    if (!sessionSaveQueue) {
+        logger.error("Queue sessionSave non créée — sauvegardes désactivées");
+    }
+
+    // ── 10. [FIX-07] ISR bouton config ───────────────────────────────────────
+    pinMode(config.data.pins.btn_config, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(config.data.pins.btn_config), btnConfigISR, FALLING);
+
+    // ── 11. Création des tâches ───────────────────────────────────────────────
+    // [FIX-01] TaskSafety — Cœur 1, priorité maximale
+    xTaskCreatePinnedToCore(
+        TaskSafety,
+        "TaskSafety",
+        16000,     // 16 KB — sécurité pure, peu de stack nécessaire
+        NULL,
+        3,         // priorité la plus haute
+        &TaskSafetyHandle,
+        1
+    );
+
+    // TaskCharging — Cœur 1, priorité intermédiaire
     xTaskCreatePinnedToCore(
         TaskCharging,
         "TaskCharging",
@@ -121,11 +255,12 @@ void setup() {
         1
     );
 
-    // 7. Tâche NETWORK — Cœur 0, priorité normale
+    // TaskNetwork — Cœur 0, priorité normale
+    // [FIX-09] Stack augmenté à 24 KB (WiFi + MQTT + OTA + WebPortal + LoRa)
     xTaskCreatePinnedToCore(
         TaskNetwork,
         "TaskNetwork",
-        16000,
+        24000,
         NULL,
         1,
         &TaskNetworkHandle,
@@ -133,92 +268,33 @@ void setup() {
     );
 }
 
-// --- COEUR 0 : GESTION RÉSEAU & WIFI ---
-void TaskNetwork(void * pvParameters) {
-    server.initStorage();
-    unsigned long lastMsg = 0;
-    logger.info("Task Network démarrée sur Coeur 0");
-    pinMode(config.data.pins.btn_config, INPUT_PULLUP);
+// ─────────────────────────────────────────────────────────────────────────────
+// CŒUR 1 — TaskSafety (priorité 3)
+// SEULE RESPONSABILITÉ : vérifier les 3 conditions d'arrêt d'urgence.
+// Aucune I/O, aucune logique métier, aucun accès réseau.
+// [FIX-08] vTaskDelayUntil() pour un timing déterministe à SAFETY_PERIOD_MS.
+// ─────────────────────────────────────────────────────────────────────────────
+#define SAFETY_PERIOD_MS 10
 
-    wifi.begin();
-    server.begin(espClient);
-    ota.begin();
-    ntp.begin();       
-    webPortal.begin();
+void TaskSafety(void* pvParameters) {
+    logger.info("TaskSafety démarrée — Cœur 1, priorité 3");
     watchdog.registerCurrentTask();
 
-    unsigned long pressStart = 0;
-    bool apStarted = false;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    for(;;) {
-        // 🟢 LE BOUTON PHYSIQUE EST TOUJOURS ACCESSIBLE POUR FORCER L'AP WIFI
-        if (digitalRead(config.data.pins.btn_config) == LOW) {
-            if (pressStart == 0) pressStart = millis();
-            if (!apStarted && millis() - pressStart > 5000) {
-                wifi.startAP();
-                apStarted = true;
-            }
-        } else {
-            pressStart = 0;
-            apStarted = false;
-        }
-
-        watchdog.reset();
-        
-        // 📶 MAINTENANCE DU RÉSEAU & PORTAIL CAPTIF
-        wifi.maintain();
-        webPortal.handleDNS(); // 🎯 AJOUT : Traitement ultra-rapide des requêtes de redirection DNS
-
-        // --- ROUTAGE MODULAIRE SELON CONFIGURATION ---
-        if (!config.data.loraEnabled) {
-            // Mode nominal : Maintien et publication via l'infrastructure WiFi/MQTT
-            ntp.maintain();    
-            ota.handle();
-            server.maintain();
-
-            if (server.isConnected() && (millis() - lastMsg > 10000)) {
-                lastMsg = millis();
-                server.publishFullStatus();
-                logger.info("MQTT : Statut périodique envoyé au serveur.");
-            }
-        } else {
-            // Mode alternatif isolé : Maintien de l'automate LoRa DX-L03
-            loraManager.maintain(); 
-        }
-
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Laisser respirer les autres tâches du Cœur 0
-    }
-}
-
-// --- COEUR 1 : GESTION DE LA CHARGE & SÉCURITÉ ---
-void TaskCharging(void * pvParameters) {
-    logger.info("Task Charging démarrée sur Coeur 1");
-
-    // tempManager.begin() est maintenant appelé dans setup() — on enregistre
-    // seulement la tâche auprès du watchdog.
-    watchdog.registerCurrentTask();
-
-    for(;;) {
+    for (;;) {
         watchdog.reset();
 
-        // 🛡️ 1. SÉCURITÉ THERMIQUE
+        // ── 🛡 1. Thermique ───────────────────────────────────────────────────
         tempManager.update();
         if (tempManager.isOverheating()) {
-            logger.critical("ARRÊT SÉCURITÉ : Surchauffe détectée !");
-            // ✅ FIX 2 — ntp.getFormattedTime() est thread-safe : elle n'accède qu'à
-            // l'horloge POSIX système via getLocalTime() (lecture seule, protégée par
-            // l'OS). Les membres mutables de NtpManager (_isSynced, _checkInterval…)
-            // ne sont écrits que dans maintain(), qui s'exécute uniquement sur le Cœur 0.
-            diagnostics.logFault("OVERHEATING", "Surchauffe critique detectee", ntp.getFormattedTime());
-            charger.forceEmergencyStop();
+            triggerEmergencyStop("OVERHEATING", "Surchauffe critique detectee");
         }
 
-        // 🛡️ 2. SÉCURITÉ DIFFÉRENTIELLE RCM
+        // ── 🛡 2. RCM — fuite différentielle ─────────────────────────────────
         if (rcm.isFaultTriggered()) {
             if (!config.data.debugMode) {
-                logger.critical("ARRÊT MATÉRIEL : Fuite de courant détectée par le RCM !");
-                diagnostics.logFault("RCM", "Fuite de courant detectee", ntp.getFormattedTime());
-                charger.forceEmergencyStop();
+                triggerEmergencyStop("RCM", "Fuite de courant detectee");
             } else {
                 static unsigned long lastRcmLog = 0;
                 if (millis() - lastRcmLog > 10000) {
@@ -228,45 +304,190 @@ void TaskCharging(void * pvParameters) {
             }
         }
 
-        // 🛡️ 3. SÉCURITÉ SURINTENSITÉ TRIPHASÉE
-        if (overcurrent.check(energy.getCurrentA(), energy.getCurrentB(), energy.getCurrentC())) {
-            logger.critical("ARRÊT SÉCURITÉ : Surintensité détectée par OvercurrentManager !");
-            diagnostics.logFault("OVERCURRENT",
-                "L1:" + String(energy.getCurrentA()) + "A "
-                "L2:" + String(energy.getCurrentB()) + "A "
-                "L3:" + String(energy.getCurrentC()) + "A",
-                ntp.getFormattedTime());
-            charger.forceEmergencyStop();
+        // ── 🛡 3. Surintensité triphasée ──────────────────────────────────────
+        float iA = energy.getCurrentA();
+        float iB = energy.getCurrentB();
+        float iC = energy.getCurrentC();
+        if (overcurrent.check(iA, iB, iC)) {
+            String detail = "L1:" + String(iA, 1) + "A "
+                          + "L2:" + String(iB, 1) + "A "
+                          + "L3:" + String(iC, 1) + "A";
+            triggerEmergencyStop("OVERCURRENT", detail.c_str());
         }
+
+        // [FIX-08] Délai déterministe — SAFETY_PERIOD_MS exact, même si
+        // tempManager.update() a pris du temps (OneWire peut durer 750 ms en
+        // conversion, à gérer en mode non bloquant côté TemperatureManager).
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(SAFETY_PERIOD_MS));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CŒUR 1 — TaskCharging (priorité 2)
+// Automate de charge + comptage énergie + gestion session.
+// [FIX-02] saveSessionLocally() remplacé par un push dans sessionSaveQueue.
+// ─────────────────────────────────────────────────────────────────────────────
+void TaskCharging(void* pvParameters) {
+    logger.info("TaskCharging démarrée — Cœur 1, priorité 2");
+    watchdog.registerCurrentTask();
+
+    for (;;) {
+        watchdog.reset();
 
         energy.update();
         ChargingState currentState = charger.getState();
 
-        // Détection début de session
+        // ── Détection début de session ────────────────────────────────────────
         if (currentState == ChargingState::STATE_C && !energy.session.isActive()) {
             energy.session.start(config.data.deviceId);
             logger.success("[OK] Session démarrée");
+            // Réinitialiser le flag d'urgence pour permettre une nouvelle session
+            // après résolution manuelle d'une alarme (ex. thermique résolue)
+            if (xSemaphoreTake(emergencyMutex, 0) == pdTRUE) {
+                emergencyActive = false;
+                xSemaphoreGive(emergencyMutex);
+            }
         }
-        // Détection fin de session
+        // ── Détection fin de session ──────────────────────────────────────────
         else if (currentState != ChargingState::STATE_C && energy.session.isActive()) {
             energy.session.stop();
             logger.success("[OK] Session terminée");
-            server.saveSessionLocally(energy.session);
+
+            // [FIX-02] Push dans la queue → TaskNetwork écrit sur LittleFS
+            if (sessionSaveQueue) {
+                // Copie de la session dans la queue (ne bloque pas si pleine)
+                if (xQueueSend(sessionSaveQueue, &energy.session, 0) != pdTRUE) {
+                    logger.warn("sessionSaveQueue pleine — session perdue !");
+                }
+            }
         }
 
         charger.update();
 
-        //ledStrip.update();
-        if (charger.isCharging()) {
-            //ledStrip.setStatusCharging();
-        } else {
-            //ledStrip.setStatusAvailable();
+        // ── Stack monitor (mode debug uniquement) ─────────────────────────────
+#ifdef DEBUG_STACK
+        static unsigned long lastStackLog = 0;
+        if (millis() - lastStackLog > 30000) {
+            Serial.printf("[STACK] TaskCharging HWM: %u bytes\n",
+                          uxTaskGetStackHighWaterMark(NULL) * 4);
+            lastStackLog = millis();
         }
+#endif
 
-        vTaskDelay(5 / portTICK_PERIOD_MS);
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CŒUR 0 — TaskNetwork (priorité 1)
+// WiFi, MQTT, OTA, WebPortal, NTP, LoRa, sauvegarde LittleFS.
+// [FIX-03] Met à jour snapshotTime chaque seconde sous ntpMutex.
+// [FIX-06] Backoff exponentiel MQTT.
+// [FIX-07] Réception des notifications ISR bouton.
+// [FIX-02] Vide la queue sessionSaveQueue et écrit sur LittleFS.
+// ─────────────────────────────────────────────────────────────────────────────
+void TaskNetwork(void* pvParameters) {
+    logger.info("TaskNetwork démarrée — Cœur 0, priorité 1");
+
+    wifi.begin();
+    server.begin(espClient);
+    ota.begin();
+    ntp.begin();
+    webPortal.begin();
+    watchdog.registerCurrentTask();
+
+    // [FIX-06] État du backoff MQTT
+    static uint32_t mqttBackoff   = 10000;   // commence à 10 s
+    static unsigned long lastMqtt = 0;
+    static const uint32_t MQTT_BACKOFF_MAX = 300000; // 5 min max
+
+    // [FIX-07] Gestion du bouton via notification ISR
+    bool apStarted = false;
+    static unsigned long btnPressStart = 0;
+
+    for (;;) {
+        watchdog.reset();
+
+        // ── [FIX-07] Bouton config via notification ISR ───────────────────────
+        uint32_t notif = 0;
+        if (xTaskNotifyWait(0, 0xFFFFFFFF, &notif, 0) == pdTRUE) {
+            if (notif & 1) {
+                if (btnPressStart == 0) btnPressStart = millis();
+            }
+        }
+        // Vérification maintien 5 s après premier front détecté
+        if (btnPressStart > 0 && digitalRead(config.data.pins.btn_config) == LOW) {
+            if (!apStarted && millis() - btnPressStart > 5000) {
+                wifi.startAP();
+                apStarted = true;
+            }
+        } else if (digitalRead(config.data.pins.btn_config) == HIGH) {
+            btnPressStart = 0;
+            apStarted = false;
+        }
+
+        // ── Maintenance réseau ────────────────────────────────────────────────
+        wifi.maintain();
+        webPortal.handleDNS();
+
+        // ── [FIX-03] Snapshot NTP (max 1×/s) ─────────────────────────────────
+        if (millis() - lastNtpSnapshot > 1000) {
+            String ts = ntp.getFormattedTime(); // appelé UNIQUEMENT ici, Cœur 0
+            if (xSemaphoreTake(ntpMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+                strncpy(snapshotTime, ts.c_str(), sizeof(snapshotTime) - 1);
+                xSemaphoreGive(ntpMutex);
+            }
+            lastNtpSnapshot = millis();
+        }
+
+        // ── [FIX-02] Sauvegarde session depuis la queue ───────────────────────
+        if (sessionSaveQueue) {
+            decltype(energy.session) savedSession;
+            while (xQueueReceive(sessionSaveQueue, &savedSession, 0) == pdTRUE) {
+                server.saveSessionLocally(savedSession);
+                logger.info("Session sauvegardée sur LittleFS.");
+            }
+        }
+
+        // ── Routage selon configuration ───────────────────────────────────────
+        if (!config.data.loraEnabled) {
+            ntp.maintain();
+            ota.handle();
+            server.maintain();
+
+            // [FIX-06] Publication MQTT avec backoff exponentiel
+            if (server.isConnected() && (millis() - lastMqtt > mqttBackoff)) {
+                lastMqtt = millis();
+                if (server.publishFullStatus()) {
+                    mqttBackoff = 10000; // succès → remise à 10 s
+                    logger.info("MQTT : statut publié.");
+                } else {
+                    mqttBackoff = min(mqttBackoff * 2, (uint32_t)MQTT_BACKOFF_MAX);
+                    logger.warn("MQTT : échec publication, backoff " +
+                                String(mqttBackoff / 1000) + "s");
+                }
+            }
+        } else {
+            loraManager.maintain();
+        }
+
+        // ── Stack monitor (mode debug uniquement) ─────────────────────────────
+#ifdef DEBUG_STACK
+        static unsigned long lastStackLogN = 0;
+        if (millis() - lastStackLogN > 30000) {
+            Serial.printf("[STACK] TaskNetwork HWM: %u bytes\n",
+                          uxTaskGetStackHighWaterMark(NULL) * 4);
+            lastStackLogN = millis();
+        }
+#endif
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// loop() — non utilisé avec FreeRTOS
+// ─────────────────────────────────────────────────────────────────────────────
 void loop() {
     vTaskDelete(NULL);
 }

@@ -99,8 +99,8 @@ void ServerManager::maintain() {
     }
 }
 
-void ServerManager::publishFullStatus() {
-    if (!isConnected()) return;
+bool ServerManager::publishFullStatus() {
+    if (!isConnected()) return false;
 
     JsonDocument doc;
     doc["device_id"] = _config.data.deviceId;
@@ -166,8 +166,10 @@ void ServerManager::publishFullStatus() {
 
     if (_client.publish(topic.c_str(), payload.c_str())) {
         _logger.success("MQTT Télémétrie envoyée avec succès !");
+        return true;
     } else {
         _logger.error("MQTT Télémétrie : Échec de l'envoi de l'enveloppe.");
+        return false;
     }
 }
 bool ServerManager::isConnected() {

@@ -22,7 +22,7 @@ public:
     void initStorage();
     void saveSessionLocally(ChargeSession& s);
     void syncPendingSessions();
-    void publishFullStatus();
+    bool publishFullStatus();
     bool isConnected();
     
 
