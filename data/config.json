@@ -13,17 +13,17 @@
   },
 
   "network": {
-    "wifi_ssid": "Livebox-57C0",
-    "wifi_pass": "Designclic94270+",
-    "ap_password": "Midi2210@bbox",
+    "wifi_ssid": "",
+    "wifi_pass": "",
+    "ap_password": "",
     "lora_enabled": false,
-    "lora_secret_key": "TvSecretKey2026!",
-    "mqtt_server": "192.168.1.28",
+    "lora_secret_key": "",
+    "mqtt_server": "",
     "mqtt_port": 1883,
-    "mqtt_user": "tervolt_admin",
-    "mqtt_pass": "MqttAuthPwd",
+    "mqtt_user": "",
+    "mqtt_pass": "",
     "ntp_server": "pool.ntp.org",
-    "ota_password": "TerVoltSecureOta2026!"
+    "ota_password": ""
   },
   "hardware": {
     "pin_cp_pwm": 13,
