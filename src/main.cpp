@@ -232,8 +232,10 @@ void setup() {
     // ── 9. [FIX-02] Queue de sauvegarde session ───────────────────────────────
     // sizeof(energy.session) — adapter si la session est un pointeur ou une struct
     sessionSaveQueue = xQueueCreate(4, sizeof(energy.session));
-    if (sessionSaveQueue != nullptr) {
-        logger.error("Queue sessionSave non créée — sauvegardes désactivées");
+    if (sessionSaveQueue == nullptr) {
+        logger.critical("FATAL : Queue sessionSave non créée — sauvegarde de session désactivée !");
+    } else {
+        logger.info("Queue sessionSave créée avec succès.");
     }
 
     // ── 10. [FIX-07] ISR bouton config ───────────────────────────────────────
