@@ -53,6 +53,7 @@ void TemperatureManager::begin() {
     _oneWire = new OneWire(_oneWirePin);
     _sensors = new DallasTemperature(_oneWire);
     _sensors->begin();
+    _sensors->setWaitForConversion(false);
 
     int sensorCount = _sensors->getDeviceCount();
     _logger.info("TemperatureManager : Bus OneWire scanné. Capteurs physiques trouvés : " + String(sensorCount));
@@ -138,10 +139,10 @@ void TemperatureManager::update() {
     _lastReadTime = millis();
 
     if (_sensors) {
-        _sensors->requestTemperatures();
-
         DeviceAddress addr;
 
+        // --- 1. LECTURE DES TEMPÉRATURES (Converties depuis le cycle précédent) ---
+        
         // Lecture Ciblée 1 : PCB ESP
         if (stringToAddress(_config.data.probes.pcb_esp, addr)) {
             float t = _sensors->getTempC(addr);
@@ -159,6 +160,10 @@ void TemperatureManager::update() {
             float t = _sensors->getTempC(addr);
             _tempContacteur = (t != DEVICE_DISCONNECTED_C) ? t : NAN;
         } else { _tempContacteur = NAN; }
+
+        // --- 2. REQUÊTE ASYNCHRONE POUR LE PROCHAIN CYCLE ---
+        // Le capteur va travailler en arrière-plan pendant 750ms sans bloquer l'ESP32
+        _sensors->requestTemperatures();
     }
 
     _tempESP = readInternalSiliconTemp();

@@ -46,6 +46,8 @@ bool ConfigManager::begin() {
     data.customer_name = doc["system"]["customer_name"] | "Inconnu";
     data.location      = doc["system"]["location"] | "Non localisé";
     data.debugMode     = doc["system"]["debug_mode"] | false;
+    data.with_auth     = doc["system"]["with_auth"] | false;
+    
 
     data.ssid          = doc["network"]["wifi_ssid"] | "";
     data.password      = doc["network"]["wifi_pass"] | "";
@@ -70,14 +72,16 @@ bool ConfigManager::begin() {
     data.pins.spi_mosi       = doc["hardware"]["pin_spi_mosi"] | -1;
     data.pins.rfid_ss        = doc["hardware"]["pin_rfid_ss"] | -1;
     data.pins.rfid_rst       = doc["hardware"]["pin_rfid_rst"] | -1;
-    data.pins.energy_cs      = doc["hardware"]["pin_energy_cs"] | -1; // Fix: aligné avec le JSON
-    data.pins.led_rgb        = doc["hardware"]["pin_led_rgb"] | -1;   // Fix: aligné avec le JSON
+    data.pins.energy_cs      = doc["hardware"]["pin_energy_cs"] | -1; 
+    data.pins.led_rgb        = doc["hardware"]["pin_led_rgb"] | -1;  
     data.pins.btn_config     = doc["hardware"]["pin_btn_config"] | -1;
     data.pins.pin_rcm_fault  = doc["hardware"]["pin_rcm_fault"] | 38;
     data.pins.pin_rcm_test   = doc["hardware"]["pin_rcm_test"] | 39;
     data.pins.pin_lora_tx    = doc["hardware"]["pin_lora_tx"] | 17;
     data.pins.pin_lora_rx    = doc["hardware"]["pin_lora_rx"] | 16;
-    data.num_leds            = doc["hardware"]["num_leds"] | 6;       // Fix: aligné avec le JSON
+    data.num_leds            = doc["hardware"]["num_leds"] | 6;       
+    data.has_screen    = doc["system"]["has_screen"] | false;
+    data.has_rfid      = doc["system"]["has_rfid"] | false;
 
     // --- PARSING SECTION : SAFETY & ELECTRICAL ---
     data.temp_max_celsius    = doc["safety"]["temp_max_celsius"] | 75;
@@ -112,6 +116,7 @@ bool ConfigManager::save() {
     doc["system"]["customer_id"]       = "001";
     doc["system"]["customer_category"] = "business";
     doc["system"]["customer_type"]     = "hotel";
+    doc["system"]["with_auth"]         = data.with_auth;
 
     // --- SÉRIALISATION : NETWORK ---
     doc["network"]["wifi_ssid"]    = data.ssid;
@@ -146,6 +151,8 @@ bool ConfigManager::save() {
     doc["hardware"]["pin_lora_tx"]        = data.pins.pin_lora_tx;
     doc["hardware"]["pin_lora_rx"]        = data.pins.pin_lora_rx;
     doc["hardware"]["num_leds"]           = data.num_leds;
+    doc["hardware"]["has_screen"]         = data.has_screen;
+    doc["hardware"]["has_rfid"]           = data.has_rfid;
 
     // --- SÉRIALISATION : ELECTRICAL ---
     doc["electrical"]["max_current_amps"]     = data.maxAmps; // Fix: Stocké dans electrical

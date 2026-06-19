@@ -218,13 +218,21 @@ void setup() {
     energy.begin();
     loraManager.begin();
 
+    if (config.data.has_rfid) {
+        rfid.begin();
+    }
+    
+    if (config.data.has_screen) {
+        screen.begin();
+    }
+
     // ── 8. [FIX-05] initStorage() dans setup(), avant les tâches ─────────────
     server.initStorage();
 
     // ── 9. [FIX-02] Queue de sauvegarde session ───────────────────────────────
     // sizeof(energy.session) — adapter si la session est un pointeur ou une struct
     sessionSaveQueue = xQueueCreate(4, sizeof(energy.session));
-    if (!sessionSaveQueue) {
+    if (sessionSaveQueue != nullptr) {
         logger.error("Queue sessionSave non créée — sauvegardes désactivées");
     }
 
@@ -354,7 +362,7 @@ void TaskCharging(void* pvParameters) {
             logger.success("[OK] Session terminée");
 
             // [FIX-02] Push dans la queue → TaskNetwork écrit sur LittleFS
-            if (sessionSaveQueue) {
+            if (sessionSaveQueue != nullptr) {
                 // Copie de la session dans la queue (ne bloque pas si pleine)
                 if (xQueueSend(sessionSaveQueue, &energy.session, 0) != pdTRUE) {
                     logger.warn("sessionSaveQueue pleine — session perdue !");
@@ -380,11 +388,7 @@ void TaskCharging(void* pvParameters) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CŒUR 0 — TaskNetwork (priorité 1)
-// WiFi, MQTT, OTA, WebPortal, NTP, LoRa, sauvegarde LittleFS.
-// [FIX-03] Met à jour snapshotTime chaque seconde sous ntpMutex.
-// [FIX-06] Backoff exponentiel MQTT.
-// [FIX-07] Réception des notifications ISR bouton.
-// [FIX-02] Vide la queue sessionSaveQueue et écrit sur LittleFS.
+// WiFi, MQTT, OTA, WebPortal, NTP, LoRa, sauvegarde LittleFS, LCD & RFID.
 // ─────────────────────────────────────────────────────────────────────────────
 void TaskNetwork(void* pvParameters) {
     logger.info("TaskNetwork démarrée — Cœur 0, priorité 1");
@@ -441,7 +445,7 @@ void TaskNetwork(void* pvParameters) {
         }
 
         // ── [FIX-02] Sauvegarde session depuis la queue ───────────────────────
-        if (sessionSaveQueue) {
+        if (sessionSaveQueue != nullptr) {
             decltype(energy.session) savedSession;
             while (xQueueReceive(sessionSaveQueue, &savedSession, 0) == pdTRUE) {
                 server.saveSessionLocally(savedSession);
@@ -471,6 +475,33 @@ void TaskNetwork(void* pvParameters) {
             loraManager.maintain();
         }
 
+        // ── 🚀 GESTION DE L'ÉCRAN LCD (Conditionnelle) ────────────────────────
+        if (config.data.has_screen) {
+            screen.update();
+        }
+
+        // ── 🚀 GESTION DE L'AUTHENTIFICATION & RFID (Conditionnelle) ──────────
+        if (!config.data.with_auth) {
+            // MODE PARTICULIER : "Plug & Charge"
+            // Si le véhicule est branché (État B) mais pas encore autorisé, on force l'autorisation
+            if (charger.getState() == ChargingState::STATE_B && !charger.isAuthorized()) {
+                charger.setAuthorized(true);
+                logger.info("[AUTH] Mode Plug & Charge : Véhicule auto-autorisé.");
+            }
+        } 
+        else if (config.data.has_rfid) {
+            // MODE B2B / PREMIUM : Attente du badge RFID
+            String uid = rfid.update();
+            if (uid != "") {
+                logger.info("[AUTH] Badge lu : " + uid);
+                
+                // Note: Ici, le badge est accepté par défaut. Plus tard, tu pourras
+                // ajouter la vérification de l'UID avec une base de données locale ou MQTT.
+                charger.setAuthorized(true);
+                logger.success("[AUTH] Session déverrouillée par badge RFID.");
+            }
+        }
+
         // ── Stack monitor (mode debug uniquement) ─────────────────────────────
 #ifdef DEBUG_STACK
         static unsigned long lastStackLogN = 0;
@@ -484,7 +515,6 @@ void TaskNetwork(void* pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // loop() — non utilisé avec FreeRTOS
 // ─────────────────────────────────────────────────────────────────────────────

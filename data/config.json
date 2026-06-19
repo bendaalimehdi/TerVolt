@@ -7,17 +7,18 @@
     "customer_type": "hotel",
     "customer_name": "Hotel-Riviera-Paris",
     "location": "Paris, France",
+    "with_auth": false,
     "debug_mode": true
     
   },
 
   "network": {
-    "wifi_ssid": "BboxM",
-    "wifi_pass": "Midi2210@bbox",
+    "wifi_ssid": "Livebox-57C0",
+    "wifi_pass": "Designclic94270+",
     "ap_password": "Midi2210@bbox",
     "lora_enabled": false,
     "lora_secret_key": "TvSecretKey2026!",
-    "mqtt_server": "192.168.1.119",
+    "mqtt_server": "192.168.1.28",
     "mqtt_port": 1883,
     "mqtt_user": "tervolt_admin",
     "mqtt_pass": "MqttAuthPwd",
@@ -44,7 +45,9 @@
     "pin_rcm_fault": 38,
     "pin_rcm_test": 39,
     "pin_lora_tx": 17,
-    "pin_lora_rx": 16
+    "pin_lora_rx": 16,
+    "has_screen": false,
+    "has_rfid": false
   },
   "probes": {
     "pcb_esp": "",

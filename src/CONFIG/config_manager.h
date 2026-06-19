@@ -54,6 +54,9 @@ struct ConfigData {
     PinConfig pins;
     float cpDividerRatio;        // Ratio réel du pont diviseur CP (ex: 4.0)
     bool  ventilationAvailable;  // La borne est-elle installée dans un local ventilé ?
+    bool  with_auth;              // La borne est-elle équipée d'un lecteur RFID pour l'authentification ?      
+    bool  has_screen;             // La borne est-elle équipée d'un écran pour l'affichage des informations ?
+    bool  has_rfid;               // La borne est-elle équipée d'un lecteur RFID pour l'authentification ?
 };
 
 
